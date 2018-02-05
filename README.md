@@ -25,6 +25,10 @@ modules
     These are lua modules that are common to all the projects
 
 
+ediscover
+---------------------
+
+    Broadcast message to find other CDC Boards
 
 
 
