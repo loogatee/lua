@@ -9,7 +9,7 @@ while infloop == 1 do
     if fd == nil then
 
         -- print("sleeping 5...")
-        os.execute( "sleep 5" )
+        os.execute( "sleep 6" )
 
     else
 
