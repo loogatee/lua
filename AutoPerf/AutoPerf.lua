@@ -7,7 +7,7 @@ require( "alien"  )
 require( "math"   )
 bit = require( "bit" )
 
-DEFAULT_DIRECTORY = "C:\\johnr\\tmp"
+DEFAULT_DIRECTORY = "C:\\PerfDataFiles"
 DEFAULT_IPADDR    = "192.168.11.115"
 
 
@@ -18,7 +18,7 @@ DIALOG_WIDTH = "                                                            "
 
 
 
-SYSLOG_PATH = DEFAULT_DIRECTORY .. "\\PerfSysLog.txt"
+SYSLOG_PATH = DEFAULT_DIRECTORY .. "\\APerfSysLog.txt"
 
 
 --
@@ -68,8 +68,8 @@ SUCCESS_MSG = " *** Success! *** "
 FAIL_MSG    = "   *** FAIL ***   "
 BLANK_MSG   = "                  "
 
-First_Connect_Has_Run = false
-First_Connect_Addr    = ""
+First_Comms_Has_Run = false
+First_Comms_Addr    = ""
 
 timer1 = iup.timer{ time=1000,  run="NO" }               -- 1000 is 1 second
 
@@ -198,13 +198,19 @@ function SysPrint( parm )
     print(parm)
 end
 
-
-
-function FirstConnect()
+--
+--  Send:   <cr><lf><cr>
+--  Get:
+--          FW_VERSION = git: COOLDATA_80_19
+--          Lua 5.1.4  Copyright (C) 1994-2008 Lua.org, PUC-Rio (double)
+--          > 
+--
+function FirstComms()
     local SS,Status,T
 
+    os.sleep(500,1000)
     conn:send("\n\r\n")
-    os.sleep(500,1000)                    -- half second
+    os.sleep(500,1000)       -- half second
     conn:receive(3)
 
     Status = ''
@@ -220,10 +226,10 @@ function FirstConnect()
     if #T > 1 and string.find(SS,'COOLDATA') ~= nil and string.find(SS,'Lua.org,') ~= nil and 
                      T[#T-1] == '>' and T[#T] == ' ' then
         SysPrint(SS)
-        First_Connect_Has_Run = true
+        First_Comms_Has_Run = true
         return 1
     else
-        First_Connect_Has_Run = false
+        First_Comms_Has_Run = false
         return 0
     end
 end
@@ -231,6 +237,7 @@ end
 
 
 --
+--  called from the timer
 --
 function CMD_Get_SerialNum()
     local SS,Status,T,a,S1
@@ -265,33 +272,27 @@ function CMD_Get_SerialNum()
 end
 
 
---  'conn' is meant to be a Global
---
---       returns 1 if good, 0 if bad
---
-function Close_Then_Connect()
-    local R,S
+function do_CMD_Test_Conn1()
 
-    conn:close()
-    First_Connect_Has_Run = false
-    os.sleep(200,1000)
-    conn = socket.tcp() 
-    R,S = conn:connect(IP_tbox.value,23)
+    SysPrint("Trying " .. IP_tbox.value .. " ... ")
 
-    if R == nil then
-        SysPrint("Close_Then_Connect: Error with conn:connect: " .. S .. "\n")
-        conn:close()
-        return 0
-    else
-        First_Connect_Addr = IP_tbox.value
-        os.sleep(400,1000)
-        conn:settimeout(0)
+    if Close_Then_Connect() == 1 and FirstComms() == 1 then
+        img_C.image = img_green
         return 1
     end
+
+    img_C.image = img_red
+    return 0
+end
+
+function CMD_Test_Conn1()
+    do_CMD_Test_Conn1()
+    main_state = MSTATE_CMD_NONE
 end
 
 
-
+--
+--
 function timer1:action_cb()
 
     timer1.run = "NO"
@@ -304,17 +305,40 @@ function timer1:action_cb()
 end
 
 
+--  'conn' is meant to be a Global
+--
+--       returns 1 if good, 0 if bad
+--
+function Close_Then_Connect()
+    local R,S
 
---[[ Good example of original function call
-function btn_cb_OneWireScan(self)
-    FULL_CMD_LOG = {}
-    btn_ShowLog.visible = "NO"
-    img_4.image  = img_gray
-    lbl_PF.title = BLANK_MSG
-    main_state   = MSTATE_CMD_READ_PB3
-    CMD_Read_PB3()
+    conn:close()
+    First_Comms_Has_Run = false
+    os.sleep(200,1000)
+    conn = socket.tcp() 
+    R,S = conn:connect(IP_tbox.value,23)
+
+    if R == nil then
+        SysPrint("Close_Then_Connect: Error with conn:connect: " .. S .. "\n")
+        conn:close()
+        return 0
+    else
+        First_Comms_Addr = IP_tbox.value
+        os.sleep(400,1000)
+        conn:settimeout(0)
+        return 1
+    end
+end
+
+
+function btn_cb_MakeMelt(self)
+
+    -- local T = os.date("*t",os.time())
+    -- print("%d%d%d",T.year,T.month,T.day)
+
     return iup.DEFAULT
-end --]]
+end
+
 
 
 function btn_cb_TestConnectivity(self)
@@ -327,8 +351,7 @@ end
 
 
 function btn_cb_GetSN(self)
-
-    if First_Connect_Has_Run == false or First_Connect_Addr ~= IP_tbox.value then
+    if First_Comms_Has_Run == false or First_Comms_Addr ~= IP_tbox.value then
         if do_CMD_Test_Conn1() == 0 then
             SN_tbox.value = 'xxxxx'
             return
@@ -344,30 +367,6 @@ function btn_cb_GetSN(self)
     return iup.DEFAULT
 end
 
-
-
-
-function do_CMD_Test_Conn1()
-    SysPrint("Trying " .. IP_tbox.value .. " ... ")
-    if Close_Then_Connect() == 1 then
-        os.sleep(500,1000)
-        if FirstConnect() == 1 then
-            img_C.image = img_green
-            return 1
-        else
-            img_C.image = img_red
-            return 0
-        end
-    else
-        img_C.image = img_red
-        return 0
-    end
-end
-
-function CMD_Test_Conn1(self)
-    main_state = MSTATE_CMD_NONE
-    do_CMD_Test_Conn1()
-end
 
 
 function do_color_toggle(StatusImage)
@@ -449,7 +448,23 @@ btn_ShowLog = iup.button {
 btn_GetSN = iup.button {
     title         = " Get S/N ",
     action        = btn_cb_GetSN,
-    font          = "COURIER_NORMAL_11",
+    font          = "COURIER_NORMAL_14",
+    impressborder = "YES",
+    visible       = "YES",
+}
+
+btn_MakeMelt = iup.button {
+    title         = " Make/Melt ",
+    action        = btn_cb_MakeMelt,
+    font          = "COURIER_NORMAL_14",
+    impressborder = "YES",
+    visible       = "YES",
+}
+
+btn_Terminate = iup.button {
+    title         = " Terminate ",
+    action        = btn_cb_Terminate,
+    font          = "COURIER_NORMAL_14",
     impressborder = "YES",
     visible       = "YES",
 }
@@ -460,6 +475,8 @@ lbl_empt01 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt02 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt03 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt04 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
+lbl_empt05 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
+lbl_empt06 = iup.label { title = "           ",  ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt1  = iup.label { title = "            ", ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_empt2  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_empt3  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP" }
@@ -477,15 +494,17 @@ lbl_emptF  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="
 lbl_emptH  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_vers   = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 
+lbl_emptM  = iup.label { title = "                                            ",  ALIGNMENT="ARIGHT:ATOP" }
+
 IP_tbox = iup.text{size="80x",value=DEFAULT_IPADDR,font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 SN_tbox = iup.text{size="60x",value="",            font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 
 
 
 conn = socket.tcp() 
-assert(conn:connect(DEFAULT_IPADDR,23))
-os.sleep(400,1000)
-conn:settimeout(0)
+--assert(conn:connect(DEFAULT_IPADDR,23))
+--os.sleep(400,1000)
+--conn:settimeout(0)
 
 
 
@@ -521,7 +540,7 @@ dlg = iup.dialog {
                     iup.hbox{lbl_SN,SN_tbox,lbl_emptL,btn_GetSN},
                     iup.hbox{lbl_2},
                     iup.hbox{lbl_empt4},
-                    iup.hbox{lbl_4,img_4},
+                    iup.hbox{lbl_empt05,btn_MakeMelt,lbl_empt06,img_4,lbl_emptM,btn_Terminate},
                     iup.hbox{lbl_empt5},
                     iup.hbox{lbl_PF},
                     iup.hbox{lbl_empt6},
@@ -543,3 +562,25 @@ dlg:showxy(iup.CENTER, iup.CENTER)
 if (iup.MainLoopLevel()==0) then
     iup.MainLoop()
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
