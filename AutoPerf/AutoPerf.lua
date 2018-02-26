@@ -196,6 +196,7 @@ function SysPrint( parm )
     SyslogFD:write(parm);
     SyslogFD:flush()
     print(parm)
+    io.flush()
 end
 
 --
@@ -333,8 +334,9 @@ end
 
 function btn_cb_MakeMelt(self)
 
-    -- local T = os.date("*t",os.time())
-    -- print("%d%d%d",T.year,T.month,T.day)
+    local T = os.date("*t",os.time())
+    print(string.format("M%s_%d%02d%02d_%02d%02d%02d",SN_tbox.value,T.year,T.month,T.day,T.hour,T.min,T.sec))
+    io.flush()
 
     return iup.DEFAULT
 end
@@ -401,6 +403,11 @@ end
 
 function create_OutFiles()
     local EN,fd,xx,nn
+
+    EN = os.dirent(DEFAULT_DIRECTORY)
+    if EN == nil then
+        os.mkdir(DEFAULT_DIRECTORY)
+    end
 
     EN = os.dirent(OUTFILES_PATH)
     if EN == nil then
