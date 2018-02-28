@@ -59,11 +59,12 @@ RETV_FAIL      = 0
 RETV_TIMER     = 1
 RETV_SUCCEED   = 2
 
-MSTATE_CMD_NONE           = 0
-MSTATE_CMD_TEST_CONN1     = 1
-MSTATE_CMD_GET_SERIALNUM  = 2
-MSTATE_MONITOR_AND_LOG    = 3
-MSTATE_DO_TERMINATE       = 4
+MSTATE_CMD_NONE            = 0
+MSTATE_CMD_TEST_CONN1      = 1
+MSTATE_CMD_GET_SERIALNUM   = 2
+MSTATE_PRE_MONITOR_AND_LOG = 3
+MSTATE_MONITOR_AND_LOG     = 4
+MSTATE_DO_TERMINATE        = 5
 
 
 OUTFILES_PATH = DEFAULT_DIRECTORY .. "\\tmp"
@@ -78,6 +79,7 @@ color_toggle     = COLOR_GRAY
 completion_time  = 0
 
 times_no_data = 0
+ShowLog_Counter = 0
 
 SUCCESS_MSG = " *** Success! *** "
 FAIL_MSG    = "   *** FAIL ***   "
@@ -313,9 +315,26 @@ function ltrim(s)
   return (s:gsub("^%s*", ""))
 end
 
+function CMD_Pre_Monitor_Log()
+    conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('AlwaysDisallowMake','0')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SingleMelt',        '0')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SysProductionMode', '3')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SingleMake',        '1')\n");  os.sleep(150,1000); rddump()
+
+    main_state     = MSTATE_MONITOR_AND_LOG
+    timer1.run     = "YES"
+    times_no_data  = 0
+    look_for_state =  LOOK_START_MAKE
+end
 
 function CMD_Monitor_Log()
     local Status,T,SS
+
+    ShowLog_Counter = ShowLog_Counter+1
+    if ShowLog_Counter == 4 then
+        Show_LogFile_Button()
+    end
 
     do_color_toggle(img_4)
 
@@ -413,6 +432,7 @@ function CMD_Do_Terminate()
         logfileFD:close()
         SysPrint( "xxxxxxxxxx Terminate\n" )
         conn:send("setcvar('SysProductionMode','0')\n");  os.sleep(180,1000); rdshow()
+        lbl_SM.title   = "Idle"
     end
 end
 
@@ -423,10 +443,11 @@ function timer1:action_cb()
 
     timer1.run = "NO"
 
-    if     main_state == MSTATE_CMD_TEST_CONN1     then   CMD_Test_Conn1()
-    elseif main_state == MSTATE_CMD_GET_SERIALNUM  then   CMD_Get_SerialNum()
-    elseif main_state == MSTATE_MONITOR_AND_LOG    then   CMD_Monitor_Log()
-    elseif main_state == MSTATE_DO_TERMINATE       then   CMD_Do_Terminate()
+    if     main_state == MSTATE_CMD_TEST_CONN1       then   CMD_Test_Conn1()
+    elseif main_state == MSTATE_CMD_GET_SERIALNUM    then   CMD_Get_SerialNum()
+    elseif main_state == MSTATE_PRE_MONITOR_AND_LOG  then   CMD_Pre_Monitor_Log()
+    elseif main_state == MSTATE_MONITOR_AND_LOG      then   CMD_Monitor_Log()
+    elseif main_state == MSTATE_DO_TERMINATE         then   CMD_Do_Terminate()
     end
 
     return iup.DEFAULT
@@ -512,21 +533,12 @@ function btn_cb_MakeMelt(self)
         return iup.DEFAULT
     end
 
-    conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os.sleep(150,1000); rddump()
-    conn:send("setcvar('AlwaysDisallowMake','0')\n");  os.sleep(150,1000); rddump()
-    conn:send("setcvar('SingleMelt',        '0')\n");  os.sleep(150,1000); rddump()
-    conn:send("setcvar('SysProductionMode', '3')\n");  os.sleep(150,1000); rddump()
-    conn:send("setcvar('SingleMake',        '1')\n");  os.sleep(150,1000); rddump()
-
-    main_state    = MSTATE_MONITOR_AND_LOG                                         -- We're logging and monitoring now
-    timer1.time   = 300                                                            -- timer at 300 milliseconds
-    timer1.run    = "YES"                                                          --    and GO!
-    times_no_data = 0                                                              -- for purposes of recovery
-
-    lbl_SM.title   =  "Make, Looking for 'Start Make'"
-    look_for_state =  LOOK_START_MAKE
-
-    Show_LogFile_Button()                                                          -- Hello!
+    main_state          = MSTATE_PRE_MONITOR_AND_LOG
+    timer1.time         = 300                                                      -- timer at 300 milliseconds
+    timer1.run          = "YES"                                                    --    and GO!
+    lbl_SM.title        = "Make, Looking for 'Start Make'"
+    btn_ShowLog.visible = "NO"
+    ShowLog_Counter     = 0
   end
 
   return iup.DEFAULT
@@ -539,6 +551,7 @@ function btn_cb_Terminate(self)
         main_state = MSTATE_DO_TERMINATE                         -- state machine the terminate function
         conn:send("setcvar('SingleMake','0')\n")                 -- Terminates the 1-second data
         terminate_count = 0                                      -- state machine uses this to count
+        lbl_SM.title   = "Terminating..."
     end
 
     return iup.DEFAULT
@@ -685,7 +698,7 @@ btn_GetSN = iup.button {
 }
 
 btn_MakeMelt = iup.button {
-    title         = " Make/Melt ",
+    title         = " Make ",
     action        = btn_cb_MakeMelt,
     font          = "COURIER_NORMAL_14",
     impressborder = "YES",
@@ -718,11 +731,11 @@ lbl_empt7  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt8  = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_emptG  = iup.label { title = "          ",   ALIGNMENT="ARIGHT:ATOP" }
 lbl_emptI  = iup.label { title = "           ",  ALIGNMENT="ARIGHT:ATOP" }
-lbl_emptJ  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP",font="COURIER_NORMAL_14" }
-lbl_emptK  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP",font="COURIER_NORMAL_14" }
-lbl_emptL  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP",font="COURIER_NORMAL_14" }
-lbl_emptN  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP",font="COURIER_NORMAL_14" }
-lbl_emptO  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP",font="COURIER_NORMAL_14" }
+lbl_emptJ  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptK  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptL  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptN  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptO  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptF  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptH  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_vers   = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
@@ -734,10 +747,9 @@ SN_tbox = iup.text{size="60x",value="",            font="COURIER_NORMAL_12",ALIG
 
 
 
+
+
 conn = socket.tcp() 
---assert(conn:connect(DEFAULT_IPADDR,23))
---os.sleep(400,1000)
---conn:settimeout(0)
 
 
 
@@ -789,7 +801,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing",
+  title = "Bear Performance Testing   1.00",
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
