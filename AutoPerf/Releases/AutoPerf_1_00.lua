@@ -10,43 +10,39 @@ require( "iuplua" )
 require( "iupluacontrols" )
 socket = require 'socket' 
 require( "string" )
+require( "ex"     )
+require( "alien"  )
 require( "math"   )
 bit = require( "bit" )
 
 
 
 
-
-
-if package.config:sub(1,1)  == '/' then
-
-    DEFAULT_DIRECTORY = "/tmp/zPerfFiles"
-    SYSLOG_PATH       = DEFAULT_DIRECTORY .. "/APerfSysLog.txt"
-    GLOBAL_OSTYPE     = 'LINUX'
-
-else
-
-    require 'ex'
-    require 'alien'
-
-    shell32 = alien.load('Shell32.dll')
-    shell32.ShellExecuteA:types("pointer","pointer","pointer","pointer", "pointer","pointer","int")
-    SHexec = shell32.ShellExecuteA
-
-    SYSLOG_PATH     = DEFAULT_DIRECTORY .. "\\APerfSysLog.txt"
-    OUTFILES_PATH   = DEFAULT_DIRECTORY .. "\\tmp"
-    C9_PATH         = OUTFILES_PATH     .. "\\cmd_9.vbs"
-    GLOBAL_OSTYPE   = 'WINDOWS'
-
-end
-
-
-
 --                       10        20        30        40        50        60
 --              123456789012345678901234567890123456789012345678901234567890
 DIALOG_WIDTH = "                                                            "
-logfileFD    = ''
 
+
+
+SYSLOG_PATH = DEFAULT_DIRECTORY .. "\\APerfSysLog.txt"
+
+logfileFD = ''
+
+--
+-- How to avoid popup a window when use os.execute in lua:
+--     http://stackoverflow.com/questions/18798044/how-to-avoid-popup-a-window-when-use-os-execute-in-lua
+--
+local shell32 = alien.load('Shell32.dll')
+shell32.ShellExecuteA:types("pointer","pointer","pointer","pointer", "pointer","pointer","int")
+local SHexec = shell32.ShellExecuteA
+
+
+C9VB = [[
+Set WshShell = CreateObject("WScript.Shell")
+Set objFSO   = CreateObject("Scripting.FileSystemObject")
+WshShell.Run "%comspec% /c C:\windows\system32\notepad.exe ]] .. SYSLOG_PATH .. [[", 0, true
+Set WshShell = Nothing
+]]
 
 LOOK_NONE               = 0
 LOOK_START_MAKE         = 1
@@ -71,6 +67,10 @@ MSTATE_MONITOR_AND_LOG     = 4
 MSTATE_DO_TERMINATE        = 5
 
 
+OUTFILES_PATH = DEFAULT_DIRECTORY .. "\\tmp"
+C9_PATH       = OUTFILES_PATH     .. "\\cmd_9.vbs"
+CMDOUT_PATH   = OUTFILES_PATH     .. "\\cmd_out.txt"
+READY_PATH    = OUTFILES_PATH     .. "\\Ready.txt"
 
 FULL_CMD_LOG     = {}
 main_state       = MSTATE_CMD_NONE
@@ -89,11 +89,7 @@ First_Comms_Has_Run = false
 First_Comms_Addr    = ""
 GLOBAL_fname        = ""
 GLOBAL_dt           = 0
-GLOBAL_mc           = 0
 GLOBAL_Status       = "None                               "
-GLOBAL_13           = 0
-GLOBAL_T            = {}
-Got_Make_Complete   = false
 look_for_state      =  LOOK_NONE
 
 timer1 = iup.timer{ time=1000,  run="NO" }               -- 1000 is 1 second
@@ -215,14 +211,7 @@ img_gray = iup.image{
   ; colors = { "0 1 0", "255 0 0", "255 255 0" }
 }
 
-function os_sleep( parm )
-  if GLOBAL_OSTYPE == 'LINUX' then
-      local a = string.format('sleep %.1f', parm/1000)
-      os.execute(a)
-  else
-      os.sleep(parm,1000)
-  end
-end
+
 
 function SysPrint( parm )
     SyslogFD:write(parm);
@@ -241,9 +230,9 @@ end
 function FirstComms()
     local SS,Status,T
 
-    os_sleep(500)
+    os.sleep(500,1000)
     conn:send("\n\r\n")
-    os_sleep(500)                 -- half second
+    os.sleep(500,1000)       -- half second
     conn:receive(3)
 
     Status = ''
@@ -267,50 +256,41 @@ function FirstComms()
 end
 
 
+
 --
---  Surprisingly, timer1.time is typed as a string.
---  That seriously messed me up for awhile!
+--  called from the timer
 --
 function CMD_Get_SerialNum()
-    local SS,Status,a,S1
+    local SS,Status,T,a,S1
 
     main_state = MSTATE_CMD_NONE
-    Status     = ''
+
+    Status = ''
+    T      = {}
 
     while Status ~= 'timeout' do
         SS,Status = conn:receive(1)
-        if SS ~= nil then GLOBAL_T[#GLOBAL_T+1] = SS end
+        if SS ~= nil then T[#T+1] = SS end
     end
 
-    SS = table.concat(GLOBAL_T)
-    a  = string.find(SS,"ZZ")                         -- finds the echo of the command string sent
+    SS = table.concat(T)
+    a  = string.find(SS,"ZZ")
 
     if a ~= nil then
-        a = string.find(SS,"ZZ%d%d%d%d%d",a+1)        -- makes sure the entire 5 digits is there after the 'ZZ'
+        a = string.find(SS,"ZZ",a+1)
         if a ~= nil then
             S1 = string.sub(SS,a+2,a+6)
             SN_tbox.value = S1
             SysPrint(S1 .. '\n')
-        elseif timer1.time == '500' then
-            timer1.time = 1500 
-            SysPrint("CMD_Get_SerialNum: (1) \n")
-            main_state = MSTATE_CMD_GET_SERIALNUM
-            timer1.run  = "YES"
         else
             SN_tbox.value = "xxxxx"
             SysPrint(SS)
         end
-    elseif timer1.time == '500' then
-        timer1.time = 1500
-        SysPrint("CMD_Get_SerialNum: (2)\n")
-        main_state = MSTATE_CMD_GET_SERIALNUM
-        timer1.run  = "YES"
     else
         SN_tbox.value = "xxxxx"
-        SysPrint('a' .. SS)
+        SysPrint(SS)
     end
 end
-
 
 
 function do_CMD_Test_Conn1()
@@ -336,14 +316,11 @@ function ltrim(s)
 end
 
 function CMD_Pre_Monitor_Log()
-    conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()
-    conn:send("setcvar('AlwaysDisallowMake','0')\n");  os_sleep(200); rddump()
-    conn:send("setcvar('SingleMelt',        '0')\n");  os_sleep(200); rddump()
-    conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()
-    conn:send("setcvar('SingleMake',        '1')\n");  os_sleep(200); rddump()
-
-    GLOBAL_13 = 0
-    GLOBAL_T  = {}
+    conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('AlwaysDisallowMake','0')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SingleMelt',        '0')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SysProductionMode', '3')\n");  os.sleep(150,1000); rddump()
+    conn:send("setcvar('SingleMake',        '1')\n");  os.sleep(150,1000); rddump()
 
     main_state     = MSTATE_MONITOR_AND_LOG
     timer1.run     = "YES"
@@ -352,7 +329,7 @@ function CMD_Pre_Monitor_Log()
 end
 
 function CMD_Monitor_Log()
-    local Status,SS
+    local Status,T,SS
 
     ShowLog_Counter = ShowLog_Counter+1
     if ShowLog_Counter == 4 then
@@ -362,21 +339,16 @@ function CMD_Monitor_Log()
     do_color_toggle(img_4)
 
     Status = ''
+    T      = {}
 
-    while GLOBAL_13 < 2 do
+    while Status ~= 'timeout' do
         SS,Status = conn:receive(1)
-        if SS ~= nil then
-            GLOBAL_T[#GLOBAL_T+1] = SS
-            if SS:byte() == 13 then GLOBAL_13=GLOBAL_13+1 end
-        end
-        if Status == 'timeout' then break end
+        if SS ~= nil then T[#T+1] = SS end
     end
 
-    if #GLOBAL_T > 1 and GLOBAL_13 == 2 then
+    if #T > 1 then
 
-        GLOBAL_13 = 0
-        SS = table.concat(GLOBAL_T)
-        GLOBAL_T = {}
+        SS = table.concat(T)
 
         if look_for_state == LOOK_START_MAKE then
             if SS:find("Start Make") ~= nil then
@@ -391,14 +363,12 @@ function CMD_Monitor_Log()
         elseif look_for_state == LOOK_MAKE_COMPLETE then
 
             if SS:find("Make complete") ~= nil then
-                Got_Make_Complete = true
                 look_for_state = LOOK_NONE
                 lbl_SM.title   = "Make complete"
                 main_state = MSTATE_DO_TERMINATE                         -- state machine the terminate function
-                conn:send("setcvar('SingleMake','0')\n")
+                conn:send("setcvar('SingleMake','0')\n")                 -- Terminates the 1-second data
                 terminate_count = 0                                      -- state machine uses this to count
             else
-                if GLOBAL_mc == 5 then
                 local n1,n2,S1,S2
 
                 S1="x";S2="x"
@@ -415,19 +385,13 @@ function CMD_Monitor_Log()
 
                 lbl_SM.title = string.format("Make, SYp=%s TWt=%s",ltrim(S1),ltrim(S2))
             end
-            end
 
         end
 
         logfileFD:write(SS)
         logfileFD:flush()
-        if GLOBAL_mc == 5 then
-            GLOBAL_mc = 0
         io.write(SS)
         io.flush()
-        else
-            GLOBAL_mc = GLOBAL_mc + 1
-        end
         times_no_data = 0
 
     else
@@ -452,27 +416,22 @@ function CMD_Do_Terminate()
     terminate_count = terminate_count + 1
 
     if terminate_count == 1 then
-        conn:send("setcvar('SingleMelt','0')\n");           os_sleep(200);  rddump()
+        conn:send("setcvar('SingleMelt','0')\n");           os.sleep(180,1000);  rddump()
     elseif terminate_count == 2 then
-        conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os_sleep(200);  rddump()
+        conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os.sleep(180,1000);  rddump()
     elseif terminate_count == 3 then
-        conn:send("setcvar('AlwaysDisallowMake','1')\n");   os_sleep(200);  rddump()
+        conn:send("setcvar('AlwaysDisallowMake','1')\n");   os.sleep(180,1000);  rddump()
     end
 
-    if terminate_count <= 7 then
+    if terminate_count <= 5 then
         CMD_Monitor_Log()
     else
         main_state   = MSTATE_CMD_NONE
-        if Got_Make_Complete == true then
-            img_4.image  = img_green                                 --     Change color to gray
-            Got_Make_Complete = false
-        else
         img_4.image  = img_gray                                  --     Change color to gray
-        end
         color_toggle = COLOR_GRAY                               --     update indicator
         logfileFD:close()
         SysPrint( "xxxxxxxxxx Terminate\n" )
-        conn:send("setcvar('SysProductionMode','0')\n");  os_sleep(200); rdshow()
+        conn:send("setcvar('SysProductionMode','0')\n");  os.sleep(180,1000); rdshow()
         lbl_SM.title   = "Idle"
     end
 end
@@ -507,7 +466,7 @@ function Close_Then_Connect()
     end
 
     First_Comms_Has_Run = false
-    os_sleep(200)
+    os.sleep(200,1000)
     conn = socket.tcp() 
     R,S = conn:connect(IP_tbox.value,23)
 
@@ -517,7 +476,7 @@ function Close_Then_Connect()
         return 0
     else
         First_Comms_Addr = IP_tbox.value
-        os_sleep(400)
+        os.sleep(400,1000)
         conn:settimeout(0)
         return 1
     end
@@ -565,11 +524,7 @@ function btn_cb_MakeMelt(self)
     end
 
     T = os.date("*t",os.time())                                                    -- Assign Filename based on SN
-    if GLOBAL_OSTYPE == 'LINUX' then
-        fname = string.format("%s/M%s_%d%02d%02d_%02d%02d%02d.txt",DEFAULT_DIRECTORY,SN_tbox.value,T.year,T.month,T.day,T.hour,T.min,T.sec)
-    else
-        fname = string.format("%s\\M%s_%d%02d%02d_%02d%02d%02d.txt",DEFAULT_DIRECTORY,SN_tbox.value,T.year,T.month,T.day,T.hour,T.min,T.sec)
-    end
+    fname = string.format("%s\\M%s_%d%02d%02d_%02d%02d%02d.txt",DEFAULT_DIRECTORY,SN_tbox.value,T.year,T.month,T.day,T.hour,T.min,T.sec)
     GLOBAL_fname = fname
 
     logfileFD = io.open(fname, 'w');                                               -- Open up the LogFile
@@ -634,7 +589,6 @@ function btn_cb_GetSN(self)
     main_state  = MSTATE_CMD_GET_SERIALNUM
     timer1.time = 500                                           
     timer1.run  = "YES"
-    GLOBAL_T    = {}
 
     btn_ShowLog.visible = "NO"                                  -- Makes the 'ShowLog' button visible.
   end
@@ -662,17 +616,14 @@ end
 
 function Show_LogFile_Button()
 
-    if GLOBAL_OSTYPE == 'WINDOWS' then
-
 local tmps = [[
 Set WshShell = CreateObject("WScript.Shell")
 Set objFSO   = CreateObject("Scripting.FileSystemObject")
 WshShell.Run "%comspec% /c C:\windows\system32\notepad.exe ]] .. GLOBAL_fname .. [[", 0, true
 Set WshShell = Nothing
 ]]
-        os.remove(C9_PATH)
-        fd=io.open(C9_PATH, 'w'); fd:write(tmps); fd:close()
-    end
+    os.remove(C9_PATH)
+    fd=io.open(C9_PATH, 'w'); fd:write(tmps); fd:close()
 
     btn_ShowLog.title   = " Show " .. GLOBAL_fname .. " "
     btn_ShowLog.visible = "YES"                              -- Makes the 'ShowLog' button visible.
@@ -680,44 +631,30 @@ end
 
 
 function Log_Button_CB()
-    if GLOBAL_OSTYPE == 'WINDOWS' then
-        local e_cmd = "/C start /min " .. C9_PATH             -- Makes full command name
-        SHexec(0,"open","cmd.exe",e_cmd,0,0)                  -- executes the VB script, causing the command to run
-    else
-        os.execute('/usr/bin/gvim ' .. GLOBAL_fname .. ' &')
-    end
+    local e_cmd = "/C start /min " .. C9_PATH             -- Makes full command name
+    SHexec(0,"open","cmd.exe",e_cmd,0,0)                  -- executes the VB script, causing the command to run
 end
 
-function isdir(path)
-        function exists(file)
-           local ok, err, code = os.rename(file, file)
-           if not ok then
-              if code == 13 then return true end
-           end
-           return ok, err
-        end
-   return exists(path.."/")
-end
 
 
 function create_OutFiles()
+    local EN,fd,xx,nn
 
-    if isdir(DEFAULT_DIRECTORY) == nil then
-        if GLOBAL_OSTYPE == 'WINDOWS' then
-            os.mkdir(DEFAULT_DIRECTORY)
-        else
-            os.execute('mkdir ' .. DEFAULT_DIRECTORY)
-        end
+    EN = os.dirent(DEFAULT_DIRECTORY)
+    if EN == nil then
+        os.mkdir(DEFAULT_DIRECTORY)
     end
 
-    if GLOBAL_OSTYPE == 'WINDOWS' then
-        if isdir(OUTFILES_PATH) == nil then
-            os.mkdir(OUTFILES_PATH)
-        end
+    EN = os.dirent(OUTFILES_PATH)
+    if EN == nil then
+        os.mkdir(OUTFILES_PATH)
     end
 
     SyslogFD=io.open(SYSLOG_PATH, 'a+');
     SysPrint("\n\n================================ " .. os.date() .. "\n");
+
+    os.remove(C9_PATH)
+    fd=io.open(C9_PATH, 'w'); fd:write(C9VB); fd:close()
 end
 
 
@@ -864,7 +801,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing   1.01",
+  title = "Bear Performance Testing   1.00",
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
