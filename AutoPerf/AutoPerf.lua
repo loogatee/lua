@@ -1,7 +1,9 @@
 
 
 DEFAULT_DIRECTORY = "C:\\PerfDataFiles"
-DEFAULT_IPADDR    = "192.168.11.115"
+--DEFAULT_IPADDR  = "192.168.11.115"
+DEFAULT_IPADDR    = "162.255.34.202"
+PORT_TO_USE       = 49991
 
 
 
@@ -187,29 +189,29 @@ IMG_GRAY = iup.image{
 GLOBALS = {
              main_state          = MSTATE_CMD_NONE,
              color_toggle        = COLOR_GRAY,
+             look_for_state      = LOOK_NONE,
              times_no_data       = 0,
              ShowLog_Counter     = 0,
+             mout_count          = 0,
+             CR_count            = 0,
+             terminate_count     = 0,
              LogfileFD           = '',
              SyslogFD            = '',
-             First_Comms_Has_Run = false,
-             First_Comms_Addr    = "",
-             dotogg              = false,
+             First_Comms_Addr    = '',
              conn                = '',
-             mout_count          = 0,
              Fname               = '',
-             CR_count            = 0,
-             TT                  = {},
+             dotogg              = false,
+             First_Comms_Has_Run = false,
              Got_Make_Complete   = false,
-             look_for_state      = LOOK_NONE,
+             TT                  = {},
              timer1              = iup.timer{ time=1000,  run="NO" },               -- 1000 is 1 second
-             terminate_count     = 0,
+             StartTime           = {0,0,0}
 }
 
 
 
 
---  parm is in milliseconds.
---  500 = 1/2 second
+--  parm is in milliseconds.  500 = 1/2 second
 function os_sleep( parm )
   if GLOBAL_OSTYPE == 'LINUX' then
       local a = string.format('sleep %.1f', parm/1000)
@@ -219,10 +221,12 @@ function os_sleep( parm )
   end
 end
 
+-- left trim: deletes leading spaces
 function ltrim(s)
   return (s:gsub("^%s*", ""))
 end
 
+-- Yeah, what you'd expect
 function isdir(path)
         function exists(file)
            local ok, err, code = os.rename(file, file)
@@ -234,13 +238,15 @@ function isdir(path)
    return exists(path .. "/")
 end
 
+--  BOTH to a file (the System Log), and to the screen (the Dos window)
 function SysPrint( parm )
     GLOBALS.SyslogFD:write(parm)
     GLOBALS.SyslogFD:flush()
-    print(parm)
+    io.write(parm)
     io.flush()
 end
 
+-- images status heartbeat:  flips between yellow and gray
 function do_color_toggle(StatusImage)
   if GLOBALS.dotogg == true then
       GLOBALS.dotogg = false
@@ -256,32 +262,78 @@ function do_color_toggle(StatusImage)
   end
 end
 
+-- Read Data, Then Show it/Log it with SysPrint()
 function rdshow()
     local T={}; local SS,Status
 
-    while Status ~= 'timeout' do
-        SS,Status = GLOBALS.conn:receive(1)
-        if SS ~= nil then T[#T+1] = SS end
+    while Status ~= 'timeout' do                     -- Done when recieve() returns 'timeout'
+        SS,Status = GLOBALS.conn:receive(1)          --   Attempts to read 1 character
+        if SS ~= nil then T[#T+1] = SS end           --   IF char is valid, accumulate it
     end
-
-    if #T >= 1 then
-        SS = table.concat(T)
-        SysPrint(SS)
-    end
+                                                     -- Timed out, there was no data available
+    if #T >= 1 then                                  -- Is there at least 1 char in the buffer?
+        SS = table.concat(T)                         --    Yes:  convert array of Bytes to String
+        SysPrint(SS)                                 --    prints String on Terminal
+    end                                              -- That's it.  Data goes to Terminal, and no where else
 end
 
+-- Read Data, then dump it.   Same as rdshow(), except No Data Saving
 function rddump()
     local SS,Status
     while Status ~= 'timeout' do SS,Status = GLOBALS.conn:receive(1) end
+end
+
+function extract_StartTime(SS)
+    local G=GLOBALS; local y = SS:find('TM=')
+    G.StartTime[1] = tonumber(SS:sub(y+3,y+4))
+    G.StartTime[2] = tonumber(SS:sub(y+6,y+7))
+    G.StartTime[3] = tonumber(SS:sub(y+9,y+10))
+
+    SysPrint(string.format("Starting Time:  %d  %d  %d\n", G.StartTime[1], G.StartTime[2], G.StartTime[3]))
+end
+
+--n1,n2,n3 = get_elapsed_time(SS)
+function get_elapsed_time(SS)
+    local n1,n2,n3,o1,o2,o3,e1,e2,e3
+
+    local y=SS:find('TM=')
+
+    n1 = tonumber(SS:sub(y+3,y+4))               -- new
+    n2 = tonumber(SS:sub(y+6,y+7))
+    n3 = tonumber(SS:sub(y+9,y+10))
+
+    o1 = GLOBALS.StartTime[1]                    -- original
+    o2 = GLOBALS.StartTime[2]
+    o3 = GLOBALS.StartTime[3]
+
+    if n3 < o3 then n3=n3+60; n2=n2-1 end
+    e3 = n3 - o3                                 -- elapsed
+
+    if n2 < o2 then n2=n2+60; n1=n1-1 end
+    e2 = n2 - o2
+
+    if n1 < o1 then n1=n1+24 end
+    e1 = n1 - o1
+
+    return string.format("%02d:%02d:%02d",e1,e2,e3)
 end
 
 
 --
 --  Send:   <cr><lf><cr>
 --  Get:
---          FW_VERSION = git: COOLDATA_80_19
+--          FW_VERSION = git: COOLDATA_80_xx
 --          Lua 5.1.4  Copyright (C) 1994-2008 Lua.org, PUC-Rio (double)
 --          > 
+--
+--  Return Values:
+--
+--          1 = Good, comms established
+--          0 - Bad, comms not yet established
+--
+--          Globals.First_Comms_Has_Run:
+--               true  - Comms with the Target HAVE BEEN established
+--               false - have NOT YET established comms with the target
 --
 function FirstComms()
     local SS,Status; local T={}
@@ -296,14 +348,14 @@ function FirstComms()
         if SS ~= nil then T[#T+1] = SS end          --    if valid char, accumulate it in 'T'
     end
 
-    SS = table.concat(T)                            -- SS makes a string out of 'T'
+    SS = table.concat(T)                            -- SS makes a string from the 'T' array
 
     if #T > 1 and SS:find('COOLDATA') ~= nil and SS:find('Lua.org,') ~= nil and T[#T-1] == '>' and T[#T] == ' ' then     -- validate the response
         SysPrint(SS)
         GLOBALS.First_Comms_Has_Run = true          -- Global that says 'comms are good'
         return 1                                    -- 'good'
     else
-        SysPrint(SS)                                -- might help with debug
+        SysPrint(SS)                                -- show on screen. Might help with debug
         GLOBALS.First_Comms_Has_Run = false         -- Global that says 'comms not yet established'
         return 0                                    -- 'bad'
     end
@@ -317,7 +369,7 @@ end
 function CMD_Get_SerialNum()
     local SS,Status,a,S1
 
-    GLOBALS.main_state = MSTATE_CMD_NONE
+    GLOBALS.main_state = MSTATE_CMD_NONE                       -- unless over-ridden, timer state goes to Idle
 
     while Status ~= 'timeout' do                               -- 'timeout' returned when no chars are available
         SS,Status = GLOBALS.conn:receive(1)                    --    reads only 1 char
@@ -353,125 +405,129 @@ function CMD_Get_SerialNum()
     end
 end
 
-
+-- Close Socket/Open Socket/Send <cr><lf><cr>/Receieve() == Expected??/update Status/
 function common_CMD_Test_Conn1()
-    SysPrint("Trying " .. IP_tbox.value .. " ... ")
+    SysPrint("Trying " .. IP_tbox.value .. " ... ")            -- Shows the IP addr on the screen
 
-    if Close_Then_Connect() == 1 and FirstComms() == 1 then
-        img_C.image = IMG_GREEN
-        return 1
+    if Close_Then_Connect() == 1 and FirstComms() == 1 then    -- Success in Establishing communications?
+        img_C.image = IMG_GREEN                                --    Yes:   Connectivity Status goes GREEN
+        return 1                                               --    'good'
     else
-        img_C.image = IMG_RED
-        return 0
+        img_C.image = IMG_RED                                  --    Nope:  Status goes to RED
+        return 0                                               --    'bad'
     end
 end
 
+-- Called from the Timer
 function CMD_Test_Conn1()
-    common_CMD_Test_Conn1()
-    GLOBALS.main_state = MSTATE_CMD_NONE
+    common_CMD_Test_Conn1()                                    --   does the grunt work of checking connectivity
+    GLOBALS.main_state = MSTATE_CMD_NONE                       --   1-and-done.  Crumbs left globally indicate pass/fail
 end
 
-
+-- CDC Setup PLUS global variable setup for running Make
 function CMD_Make_Pre_Monitor_Log()
-    GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()
-    GLOBALS.conn:send("setcvar('AlwaysDisallowMake','0')\n");  os_sleep(200); rddump()
-    GLOBALS.conn:send("setcvar('SingleMelt',        '0')\n");  os_sleep(200); rddump()
-    GLOBALS.conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()
-    GLOBALS.conn:send("setcvar('SingleMake',        '1')\n");  os_sleep(200); rddump()
+    GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()      -- Make ONLY.  This dis-allows Melt
+    GLOBALS.conn:send("setcvar('AlwaysDisallowMake','0')\n");  os_sleep(200); rddump()      -- Turns OFF the dis-allow on Make
+    GLOBALS.conn:send("setcvar('SingleMelt',        '0')\n");  os_sleep(200); rddump()      -- SingleMelt has to be OFF when Making
+    GLOBALS.conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()      -- Turns ON the data stream
+    GLOBALS.conn:send("setcvar('SingleMake',        '1')\n");  os_sleep(200); rddump()      -- Turns ON the Make
 
-    GLOBALS.main_state     = MSTATE_MAKE_MONITOR_AND_LOG
-    GLOBALS.look_for_state = LOOK_START_MAKE
-    GLOBALS.times_no_data  = 0
-    GLOBALS.CR_count       = 0
-    GLOBALS.TT             = {}
-    GLOBALS.timer1.run     = "YES"
+    GLOBALS.look_for_state = LOOK_START_MAKE                        -- Inits the 'look_for_state' StateMachine in CMD_Make_Monitor_Log()
+    GLOBALS.times_no_data  = 0                                      -- For Recovery purposes: Counts up when there's no 1-second data available for reading
+    GLOBALS.CR_count       = 0                                      -- ***** Carriage-Return count.   Need 2 of them to complete a single line  ******
+    GLOBALS.TT             = {}                                     -- Table where data is accumulated.  'TT' named to distinguish from name 'T'
+    GLOBALS.main_state     = MSTATE_MAKE_MONITOR_AND_LOG            -- Timer State, so calls CMD_Make_Monitor_Log()
+    GLOBALS.timer1.run     = "YES"                                  -- go,go,gadget!
 end
 
+-- called from Timer.  Monitors and Logs the 1-sec data from the Make
 function CMD_Make_Monitor_Log()
     local SS,Status
 
-    do_color_toggle(img_MakeResult)
+    do_color_toggle(img_MakeResult)                                                    -- yellow/gray visual ticker on the Dialog. Says: 'I'm alive'
 
-    if GLOBALS.ShowLog_Counter == 4 then
-        Show_LogFile_Button()
-    else
-        GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1
+    if GLOBALS.ShowLog_Counter == 4 then                                               -- counter controls when the 'Show File' Button will appear
+        Show_LogFile_Button()                                                          --    got the count, show the button
+    else                                                                               -- ELSE
+        GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1                            --    count up.  Button is not shown yet.   
     end
 
-    while GLOBALS.CR_count < 2 do
-        SS,Status = GLOBALS.conn:receive(1)
-        if SS ~= nil then
-            GLOBALS.TT[#GLOBALS.TT+1] = SS
-            if SS:byte() == 13 then GLOBALS.CR_count=GLOBALS.CR_count+1 end
+    while GLOBALS.CR_count < 2 do                                                      -- Keep receiving until 2 Carriage-Returns are received
+        SS,Status = GLOBALS.conn:receive(1)                                            --    Receive a single character
+        if SS ~= nil then                                                              --    Is the char received valid?
+            GLOBALS.TT[#GLOBALS.TT+1] = SS                                             --       Yes:   Add char to array 'TT'
+            if SS:byte() == 13 then GLOBALS.CR_count=GLOBALS.CR_count+1 end            --       Add to count if char was <Carriage-Return>
         end
-        if Status == 'timeout' then break end
+        if Status == 'timeout' then break end                                          -- Quite loop is Status indicates timeout
     end
 
-    if #GLOBALS.TT > 1 and GLOBALS.CR_count == 2 then
+    if #GLOBALS.TT > 1 and GLOBALS.CR_count == 2 then                                  -- IF more than 1 char in the buffer AND 2 <cr>'s have been received
 
-        GLOBALS.CR_count = 0
-        SS               = table.concat(GLOBALS.TT)
-        GLOBALS.TT       = {}
+        GLOBALS.CR_count = 0                                                           -- Re-init the <cr> count
+        SS               = table.concat(GLOBALS.TT)                                    -- All the bytes go into making string SS
+        GLOBALS.TT       = {}                                                          -- done with array TT, can now re-initialize it
 
-        if GLOBALS.look_for_state == LOOK_START_MAKE then
-            if SS:find("Start Make") ~= nil then
-                GLOBALS.look_for_state = LOOK_EEV_CONTROL_ACTIVE
-                lbl_SM.title   =  "Make, Looking for 'EEV control active'"
+        if GLOBALS.look_for_state == LOOK_START_MAKE then                              -- Start running through the state machine here
+            if SS:find("Start Make") ~= nil then                                       --   'Start Make' will be in the data as an event
+                GLOBALS.look_for_state = LOOK_EEV_CONTROL_ACTIVE                       --   on to the next state
+                lbl_SM.title   =  "Make, Looking for 'EEV control active'"             --   updates the status message on the Dialog
+                extract_StartTime(SS)
             end
-        elseif GLOBALS.look_for_state == LOOK_EEV_CONTROL_ACTIVE then
-            if SS:find("EEV control active") ~= nil then
-                GLOBALS.look_for_state = LOOK_MAKE_COMPLETE
-                lbl_SM.title   =  "Make, Looking for 'Make complete'"
+        elseif GLOBALS.look_for_state == LOOK_EEV_CONTROL_ACTIVE then                  -- Are we in this state?
+            if SS:find("EEV control active") ~= nil then                               --   when 'EEV control active', the make is Making!
+                GLOBALS.look_for_state = LOOK_MAKE_COMPLETE                            --   Looking next to be done
+                lbl_SM.title   =  "Make, Looking for 'Make complete'"                  --   update Status Message
             end
-        elseif GLOBALS.look_for_state == LOOK_MAKE_COMPLETE then                 -- Make is on-going.  Looking for 'Make complete'
+        elseif GLOBALS.look_for_state == LOOK_MAKE_COMPLETE then                       -- Make is on-going.  Looking for 'Make complete'
 
-            if SS:find("Make complete") ~= nil then                              -- Looking for this in the data stream
-                GLOBALS.Got_Make_Complete = true                                 --   so Status Image turns green
-                GLOBALS.look_for_state    = LOOK_NONE                            --   done, so not lookin for anything
-                lbl_SM.title              = "Make complete"                      --   shown on the Dialog
-                GLOBALS.main_state        = MSTATE_DO_TERMINATE_MAKE             --   state machine the terminate function
-                GLOBALS.terminate_count   = 0                                    --   state machine uses this to count
-                GLOBALS.conn:send("setcvar('SingleMake','0')\n")                 --   Make is OFF
-            else                                                                 -- ELSE, make is not yet complete
-                if GLOBALS.mout_count == 5 then                                  --   Count so that Screen output is every 5 seconds
-                    local n1,n2,S1,S2
-                    S1="x";S2="x"                                                --   Init to something/anything
-                    n1 = SS:find("SYp="); if n1 ~= nil then                      --   Look for 'SYp' in the data
-                        n2 = SS:find("CSp",n1)                                   --      Found 'SYp'.  Now find 'CSp'
-                        if n2 ~= nil then S1 = SS:sub(n1+4,n2-2) end             --      Found both SYp and CSp. This extracts SYp value
+            if SS:find("Make complete") ~= nil then                                    -- Looking for this in the data stream
+                GLOBALS.Got_Make_Complete = true                                       --   so Status Image turns green
+                GLOBALS.look_for_state    = LOOK_NONE                                  --   done, so not lookin for anything
+                lbl_SM.title              = "Make complete"                            --   shown on the Dialog
+                GLOBALS.main_state        = MSTATE_DO_TERMINATE_MAKE                   --   state machine the terminate function
+                GLOBALS.terminate_count   = 0                                          --   state machine uses this to count
+                GLOBALS.conn:send("setcvar('SingleMake','0')\n")                       --   Make is OFF
+            else                                                                       -- ELSE, make is not yet complete
+                if GLOBALS.mout_count == 5 then                                        --   Count so that Screen output is every 5 seconds
+                    local n1,n2,S1,S2,S3
+                    S1="x";S2="x"                                                      --   Init to something/anything
+                    n1 = SS:find("SYp="); if n1 ~= nil then                            --   Look for 'SYp' in the data
+                        n2 = SS:find("CSp",n1)                                         --      Found 'SYp'.  Now find 'CSp'
+                        if n2 ~= nil then S1 = SS:sub(n1+4,n2-2) end                   --      Found both SYp and CSp. This extracts SYp value
                     end
-                    n1 = SS:find("TWt="); if n1 ~= nil then                      --   Look for 'TWt' in the data
-                        n2 = SS:find("CBt",n1)
-                        if n2 ~= nil then S2 = SS:sub(n1+4,n2-2) end
+                    n1 = SS:find("TWt="); if n1 ~= nil then                            --   Look for 'TWt' in the data
+                        n2 = SS:find("CBt",n1)                                         --      Found 'TWt'.  Now find 'CBt'
+                        if n2 ~= nil then S2 = SS:sub(n1+4,n2-2) end                   --      Found both TWt and CBt. This extracts TWt value
                     end
-                    lbl_SM.title = string.format("Make, SYp=%s TWt=%s",ltrim(S1),ltrim(S2))
+                    S3= get_elapsed_time(SS)
+                    lbl_SM.title = string.format("Make, SYp=%s TWt=%s  (%s)",ltrim(S1),ltrim(S2),S3)     -- Show SYp and TWt as Status Msg on the Dialog
                 end
             end
 
         end
 
-        GLOBALS.LogfileFD:write(SS)
-        GLOBALS.LogfileFD:flush()
-        if GLOBALS.mout_count == 5 then
-            GLOBALS.mout_count = 0
-            io.write(SS)
-            io.flush()
+        GLOBALS.LogfileFD:write(SS)                                                    -- EVERYTHING gets written to the Logfile
+        GLOBALS.LogfileFD:flush()                                                      -- so it REALLY gets written!
+        if GLOBALS.mout_count == 5 then                                                -- Simple count method to limit messages on the screen
+            GLOBALS.mout_count = 0                                                     --   re-init
+            io.write(SS)                                                               --   writes it out to the screen
+            io.flush()                                                                 --   AND forces it out the chute!
         else
-            GLOBALS.mout_count = GLOBALS.mout_count + 1
+            GLOBALS.mout_count = GLOBALS.mout_count + 1                                -- count it up
         end
-        GLOBALS.times_no_data = 0
+        GLOBALS.times_no_data = 0                                                      -- We got data, so this indicator can be reset
 
-    else
-        GLOBALS.times_no_data = GLOBALS.times_no_data + 1
-        if GLOBALS.times_no_data > 100 then
-            GLOBALS.times_no_data = 0
-            io.write( "zzz 100 Times zzz\n" )
-            io.flush()
+    else                                                                               -- ELSE we got no data: Zilcho
+        GLOBALS.times_no_data = GLOBALS.times_no_data + 1                              --   Number of consecutive times reading NO data
+        if GLOBALS.times_no_data > 100 then                                            --   Get to 100 and Houston, we have a problem
+            GLOBALS.times_no_data = 0                                                  --      This is where recovery should happen
+            io.write( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
+            io.flush()                                                                 --      This is where recovery should happen
         end
     end
 
-    GLOBALS.timer1.run = "YES"
-
+    GLOBALS.timer1.run = "YES"                                                         -- Must do this to keep the timer running, so that
+                                                                                       --    this routine gets called continually
 end
 
 
@@ -548,8 +604,7 @@ function Close_Then_Connect()
     GLOBALS.First_Comms_Has_Run = false                                         -- 'good' Connection Indicator inits to false
     os_sleep(200)                                                               -- lets not rush into this
     GLOBALS.conn = socket.tcp()                                                 -- Opens up socket. Descriptor in 'GLOBALS.conn'
-    R,S = GLOBALS.conn:connect(IP_tbox.value,23)                                -- Connect to the Telnet channel.  Lotta magic here!
-    --R,S = GLOBALS.conn:connect(IP_tbox.value,49991)                           -- 49991 is Port Forward on the Riverside router
+    R,S = GLOBALS.conn:connect(IP_tbox.value,PORT_TO_USE)                       -- Connect to the Telnet channel.  Lotta magic here!
 
     if R == nil then                                                            -- if R is nil, that's not good
         SysPrint("Close_Then_Connect: Error with conn:connect: " .. S .. "\n")  --    Show error msg with connect()
