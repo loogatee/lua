@@ -1,9 +1,8 @@
 
 
 DEFAULT_DIRECTORY = "C:\\PerfDataFiles"
---DEFAULT_IPADDR  = "192.168.11.115"
-DEFAULT_IPADDR    = "162.255.34.202"
-PORT_TO_USE       = 49991
+DEFAULT_IPADDR    = "10.0.107.107"
+PORT_TO_USE       = 23
 
 
 
@@ -744,8 +743,9 @@ end
 
 function Log_Button_CB()
     if GLOBAL_OSTYPE == 'WINDOWS' then
-        local e_cmd = "/C start /min " .. C9_PATH             -- Makes full command name
-        SHexec(0,"open","cmd.exe",e_cmd,0,0)                  -- executes the VB script, causing the command to run
+        local e_cmd = "cmd.exe /C start /min " .. C9_PATH             -- Makes full command name
+        --SHexec(0,"open","cmd.exe",e_cmd,0,0)                  -- executes the VB script, causing the command to run
+        os.execute(e_cmd)
     else
         os.execute('/usr/bin/gvim ' .. GLOBALS.Fname .. ' &')
     end
@@ -917,7 +917,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing   1.01",
+  title = "Bear Performance Testing   1.02",
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
