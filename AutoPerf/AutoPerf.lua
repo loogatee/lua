@@ -27,6 +27,7 @@ if package.config:sub(1,1)  == '/' then
     DEFAULT_DIRECTORY = "/tmp/zPerfFiles"
     SYSLOG_PATH       = DEFAULT_DIRECTORY .. "/APerfSysLog.txt"
     FNAME_FMT         = "%s/M%s_%d%02d%02d_%02d%02d%02d.txt"
+    GLOBAL_STATUS     = "None                                               "
     GLOBAL_OSTYPE     = 'LINUX'
 
 else
@@ -42,6 +43,7 @@ else
     OUTFILES_PATH   = DEFAULT_DIRECTORY .. "\\tmp"
     C9_PATH         = OUTFILES_PATH     .. "\\cmd_9.vbs"
     FNAME_FMT       = "%s\\M%s_%d%02d%02d_%02d%02d%02d.txt"
+    GLOBAL_STATUS   = "None                                              "
     GLOBAL_OSTYPE   = 'WINDOWS'
 
 end
@@ -51,7 +53,6 @@ end
 --                                          10        20        30        40        50        60
 --                                 123456789012345678901234567890123456789012345678901234567890
 DIALOG_WIDTH                    = "                                                            "
-GLOBAL_STATUS                   = "None                                              "
 
 COLOR_YELLOW                    = 0
 COLOR_GRAY                      = 1
