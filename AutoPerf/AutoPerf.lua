@@ -450,6 +450,7 @@ function CMD_Make_Monitor_Log()
     do_color_toggle(img_MakeResult)                                                    -- yellow/gray visual ticker on the Dialog. Says: 'I'm alive'
 
     if GLOBALS.ShowLog_Counter == 4 then                                               -- counter controls when the 'Show File' Button will appear
+        GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1                            --    count up.  Button is not shown yet.   
         Show_LogFile_Button()                                                          --    got the count, show the button
     else                                                                               -- ELSE
         GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1                            --    count up.  Button is not shown yet.   
