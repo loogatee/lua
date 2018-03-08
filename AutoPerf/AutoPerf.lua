@@ -199,6 +199,7 @@ GLOBALS = {
              First_Comms_Addr    = '',
              conn                = '',
              Fname               = '',
+             Button_Fname        = '',
              dotogg              = false,
              First_Comms_Has_Run = false,
              Got_Make_Complete   = false,
@@ -757,6 +758,8 @@ Set WshShell = Nothing
         fd=io.open(C9_PATH, 'w'); fd:write(tmps); fd:close()
     end
 
+    GLOBALS.Button_Fname = GLOBALS.Fname
+
     btn_ShowLog.title   = " Show " .. GLOBALS.Fname .. " "
     btn_ShowLog.visible = "YES"                              -- Makes the 'ShowLog' button visible.
   end
@@ -769,7 +772,7 @@ function Log_Button_CB()
         --SHexec(0,"open","cmd.exe",e_cmd,0,0)                  -- executes the VB script, causing the command to run
         os.execute(e_cmd)
     else
-        os.execute('/usr/bin/gvim ' .. GLOBALS.Fname .. ' &')
+        os.execute('/usr/bin/gvim ' .. GLOBALS.Button_Fname .. ' &')
     end
 end
 
