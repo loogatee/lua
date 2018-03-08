@@ -294,7 +294,7 @@ end
 
 --n1,n2,n3 = get_elapsed_time(SS)
 function get_elapsed_time(SS)
-    local n1,n2,n3,o1,o2,o3,e1,e2,e3
+    local n1,n2,n3,o1,o2,o3
 
     local y=SS:find('TM=')
 
@@ -307,15 +307,10 @@ function get_elapsed_time(SS)
     o3 = GLOBALS.StartTime[3]
 
     if n3 < o3 then n3=n3+60; n2=n2-1 end
-    e3 = n3 - o3                                 -- elapsed
-
     if n2 < o2 then n2=n2+60; n1=n1-1 end
-    e2 = n2 - o2
+    if n1 < o1 then n1=n1+24          end
 
-    if n1 < o1 then n1=n1+24 end
-    e1 = n1 - o1
-
-    return string.format("%02d:%02d:%02d",e1,e2,e3)
+    return string.format("%02d:%02d:%02d",(n1-o1),(n2-o2),(n3-o3))
 end
 
 
