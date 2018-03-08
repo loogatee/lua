@@ -51,7 +51,7 @@ end
 --                                          10        20        30        40        50        60
 --                                 123456789012345678901234567890123456789012345678901234567890
 DIALOG_WIDTH                    = "                                                            "
-GLOBAL_STATUS                   = "None                                       "
+GLOBAL_STATUS                   = "None                                              "
 
 COLOR_YELLOW                    = 0
 COLOR_GRAY                      = 1
@@ -350,10 +350,13 @@ function FirstComms()
     SS = table.concat(T)                            -- SS makes a string from the 'T' array
 
     if #T > 1 and SS:find('COOLDATA') ~= nil and SS:find('Lua.org,') ~= nil and T[#T-1] == '>' and T[#T] == ' ' then     -- validate the response
+        os_sleep(100)
+        GLOBALS.conn:send("setcvar('SingleMake','0');setcvar('SingleMelt','0')\n")
         SysPrint(SS)
-        GLOBALS.First_Comms_Has_Run = true          -- Global that says 'comms are good'
+        GLOBALS.First_Comms_Has_Run = true          -- Global that says 'comms are good' GLOBALS.conn:send("setcvar('SingleMake','0');
         return 1                                    -- 'good'
     else
+        GLOBALS.conn:send("setcvar('SysProductionMode', '0')\n")    -- Works in cases where telnet stream still on
         SysPrint(SS)                                -- show on screen. Might help with debug
         GLOBALS.First_Comms_Has_Run = false         -- Global that says 'comms not yet established'
         return 0                                    -- 'bad'
@@ -562,7 +565,13 @@ function CMD_Do_Terminate()
         end
 
         GLOBALS.color_toggle = COLOR_GRAY                                 -- So toggle knows what the current state is
-        GLOBALS.LogfileFD:close()                                         -- Logfile officially closed
+
+        if GLOBALS.LogfileFD ~= '' then
+            GLOBALS.LogfileFD:close()                                         -- Logfile officially closed
+            GLOBALS.LogfileFD = ''
+            GLOBALS.Fname     = ''
+        end
+
         SysPrint( "------------------   Terminate\n" )                    -- visual indicator both in syslog and screen
         GLOBALS.conn:send("setcvar('SysProductionMode','0')\n");          -- This will turn Off the 1-second data
         os_sleep(200)                                                     -- very short sleep
@@ -644,6 +653,8 @@ function btn_cb_Make(self)
 
       GLOBALS.LogfileFD = io.open(fname, 'w');                                         -- Open up the LogFile for writing
       if GLOBALS.LogfileFD == nil then                                                 -- Test for Error
+          GLOBALS.Fname     = ''
+          GLOBALS.LogfileFD = ''
           iup.Message("file open error", "ERROR opening:\n\r" .. fname)                -- Show Error message
           return iup.DEFAULT                                                           -- due to error, make was not entered
       end
@@ -673,6 +684,13 @@ function btn_cb_Terminate(self)
         GLOBALS.conn:send("setcvar('SingleMelt','0')\n")                 --   Stops the Melt.  1-sec data still streaming
         GLOBALS.terminate_count = 0                                      --   state machine uses this to count
         lbl_SM.title    = "Terminating..."                               --   updates message on the Dialog
+    elseif GLOBALS.main_state == MSTATE_CMD_NONE and GLOBALS.First_Comms_Has_Run == true then
+        GLOBALS.main_state = MSTATE_DO_TERMINATE_MAKE                    --   state machine the terminate functionjjjj
+        GLOBALS.conn:send("setcvar('SingleMake','0')\n")                 --   Stops the Make.  1-sec data still streaming
+        GLOBALS.terminate_count = 0                                      --   state machine uses this to count
+        lbl_SM.title    = "Terminating..."                               --   updates message on the Dialog
+        GLOBALS.timer1.time = 200                                        -- timer will run in 100 milliseconds
+        GLOBALS.timer1.run  = "YES"                                      -- yep
     end
 
     return iup.DEFAULT
@@ -724,6 +742,8 @@ end
 
 function Show_LogFile_Button()
 
+  if GLOBALS.Fname ~= '' then
+
     if GLOBAL_OSTYPE == 'WINDOWS' then
 
 local tmps = [[
@@ -733,11 +753,13 @@ WshShell.Run "%comspec% /c C:\windows\system32\notepad.exe ]] .. GLOBALS.Fname .
 Set WshShell = Nothing
 ]]
         os.remove(C9_PATH)
+        local fd
         fd=io.open(C9_PATH, 'w'); fd:write(tmps); fd:close()
     end
 
     btn_ShowLog.title   = " Show " .. GLOBALS.Fname .. " "
     btn_ShowLog.visible = "YES"                              -- Makes the 'ShowLog' button visible.
+  end
 end
 
 
@@ -917,7 +939,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing   1.02",
+  title = "Bear Performance Testing   1.03",
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
