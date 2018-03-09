@@ -3,6 +3,8 @@
 DEFAULT_DIRECTORY = "C:\\PerfDataFiles"
 DEFAULT_IPADDR    = "10.0.107.107"
 PORT_TO_USE       = 23
+DEFAULT_IPADDR    = "162.255.34.202"
+PORT_TO_USE       = 49991
 
 
 
@@ -57,18 +59,26 @@ DIALOG_WIDTH                    = "                                             
 COLOR_YELLOW                    = 0
 COLOR_GRAY                      = 1
 
+DEF_MAKE                        = 1
+DEF_MELT                        = 2
+
 MSTATE_CMD_NONE                 = 0
 MSTATE_CMD_TEST_CONN1           = 1
 MSTATE_CMD_GET_SERIALNUM        = 2
 MSTATE_MAKE_PRE_MONITOR_AND_LOG = 3
 MSTATE_MAKE_MONITOR_AND_LOG     = 4
-MSTATE_DO_TERMINATE_MAKE        = 5
-MSTATE_DO_TERMINATE_MELT        = 6
+MSTATE_MELT_PRE_MONITOR_AND_LOG = 5
+MSTATE_MELT_MONITOR_AND_LOG     = 6
+MSTATE_DO_TERMINATE_MAKE        = 7
+MSTATE_DO_TERMINATE_MELT        = 8
 
 LOOK_NONE                       = 0
 LOOK_START_MAKE                 = 1
 LOOK_EEV_CONTROL_ACTIVE         = 2
 LOOK_MAKE_COMPLETE              = 3
+LOOK_START_MELT                 = 4
+LOOK_RPM_FINAL_VALUE            = 5
+LOOK_MELT_COMPLETE              = 6
 
 
 IMG_GREEN = iup.image{
@@ -192,7 +202,7 @@ GLOBALS = {
              look_for_state      = LOOK_NONE,
              times_no_data       = 0,
              ShowLog_Counter     = 0,
-             mout_count          = 0,
+             mout_count          = 1,
              CR_count            = 0,
              terminate_count     = 0,
              LogfileFD           = '',
@@ -204,6 +214,8 @@ GLOBALS = {
              dotogg              = false,
              First_Comms_Has_Run = false,
              Got_Make_Complete   = false,
+             Got_Melt_Complete   = false,
+             do_screen_output    = false,
              TT                  = {},
              timer1              = iup.timer{ time=1000,  run="NO" },               -- 1000 is 1 second
              StartTime           = {0,0,0}
@@ -285,11 +297,17 @@ function rddump()
 end
 
 function extract_StartTime(SS)
-    local G=GLOBALS; local y = SS:find('TM=')
-    G.StartTime[1] = tonumber(SS:sub(y+3,y+4))
-    G.StartTime[2] = tonumber(SS:sub(y+6,y+7))
-    G.StartTime[3] = tonumber(SS:sub(y+9,y+10))
+    local G=GLOBALS;    local y = SS:find('TM=%d%d:%d%d:%d%d')
 
+    if y ~= nil then
+        G.StartTime[1] = tonumber(SS:sub(y+3,y+4 ))
+        G.StartTime[2] = tonumber(SS:sub(y+6,y+7 ))
+        G.StartTime[3] = tonumber(SS:sub(y+9,y+10))
+    else
+        G.StartTime[1] = 0
+        G.StartTime[2] = 0
+        G.StartTime[3] = 0
+    end
     SysPrint(string.format("Starting Time:  %d  %d  %d\n", G.StartTime[1], G.StartTime[2], G.StartTime[3]))
 end
 
@@ -297,21 +315,46 @@ end
 function get_elapsed_time(SS)
     local n1,n2,n3,o1,o2,o3
 
-    local y=SS:find('TM=')
+    local y = SS:find('TM=%d%d:%d%d:%d%d')
 
-    n1 = tonumber(SS:sub(y+3,y+4))               -- new
-    n2 = tonumber(SS:sub(y+6,y+7))
-    n3 = tonumber(SS:sub(y+9,y+10))
+    if y ~= nil then
+        n1 = tonumber(SS:sub(y+3,y+4 ))               -- new
+        n2 = tonumber(SS:sub(y+6,y+7 ))
+        n3 = tonumber(SS:sub(y+9,y+10))
 
-    o1 = GLOBALS.StartTime[1]                    -- original
-    o2 = GLOBALS.StartTime[2]
-    o3 = GLOBALS.StartTime[3]
+        o1 = GLOBALS.StartTime[1]                    -- original
+        o2 = GLOBALS.StartTime[2]
+        o3 = GLOBALS.StartTime[3]
 
-    if n3 < o3 then n3=n3+60; n2=n2-1 end
-    if n2 < o2 then n2=n2+60; n1=n1-1 end
-    if n1 < o1 then n1=n1+24          end
+        if n3 < o3 then n3=n3+60; n2=n2-1 end
+        if n2 < o2 then n2=n2+60; n1=n1-1 end
+        if n1 < o1 then n1=n1+24          end
 
-    return string.format("%02d:%02d:%02d",(n1-o1),(n2-o2),(n3-o3))
+        return string.format("%02d:%02d:%02d",(n1-o1),(n2-o2),(n3-o3))
+    else
+        return "00:00:0x"
+    end
+end
+
+
+-- common function for CMD_Make, CMD_Melt
+function Do_Status_Message(SS,mtype)
+  
+  if GLOBALS.mout_count == 5 then                                      --   Count so that Dialog Output is every 5 seconds
+    local n1,n2,S1,S2,S3
+    S1="x";S2="x"                                                      --   Init to something/anything
+    n1 = SS:find("SYp="); if n1 ~= nil then                            --   Look for 'SYp' in the data
+        n2 = SS:find("CSp",n1)                                         --      Found 'SYp'.  Now find 'CSp'
+        if n2 ~= nil then S1 = SS:sub(n1+4,n2-2) end                   --      Found both SYp and CSp. This extracts SYp value
+    end
+    n1 = SS:find("TWt="); if n1 ~= nil then                            --   Look for 'TWt' in the data
+        n2 = SS:find("CBt",n1)                                         --      Found 'TWt'.  Now find 'CBt'
+        if n2 ~= nil then S2 = SS:sub(n1+4,n2-2) end                   --      Found both TWt and CBt. This extracts TWt value
+    end
+    S3=get_elapsed_time(SS)
+    lbl_SM.title = string.format("%s, SYp=%s TWt=%s  (%s)",mtype,ltrim(S1),ltrim(S2),S3)     -- Show SYp and TWt as Status Msg on the Dialog
+  end
+
 end
 
 
@@ -423,6 +466,7 @@ function CMD_Test_Conn1()
     GLOBALS.main_state = MSTATE_CMD_NONE                       --   1-and-done.  Crumbs left globally indicate pass/fail
 end
 
+
 -- CDC Setup PLUS global variable setup for running Make
 function CMD_Make_Pre_Monitor_Log()
     GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()      -- Make ONLY.  This dis-allows Melt
@@ -439,32 +483,124 @@ function CMD_Make_Pre_Monitor_Log()
     GLOBALS.timer1.run     = "YES"                                  -- go,go,gadget!
 end
 
--- called from Timer.  Monitors and Logs the 1-sec data from the Make
-function CMD_Make_Monitor_Log()
-    local SS,Status
 
-    do_color_toggle(img_MakeResult)                                                    -- yellow/gray visual ticker on the Dialog. Says: 'I'm alive'
+-- CDC Setup PLUS global variable setup for running Melt
+function CMD_Melt_Pre_Monitor_Log()
+    GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','0')\n");  os_sleep(200); rddump()      -- Melt Allowed
+    GLOBALS.conn:send("setcvar('AlwaysDisallowMake','1')\n");  os_sleep(200); rddump()      -- Make is not Allowed
+    GLOBALS.conn:send("setcvar('SingleMake',        '0')\n");  os_sleep(200); rddump()      -- Make OFF
+    GLOBALS.conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()      -- Turns ON the data stream
+    GLOBALS.conn:send("setcvar('SingleMelt',        '1')\n");  os_sleep(200); rddump()      -- Melt ON
 
-    if GLOBALS.ShowLog_Counter == 4 then                                               -- counter controls when the 'Show File' Button will appear
-        GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1                            --    count up.  Button is not shown yet.   
-        Show_LogFile_Button()                                                          --    got the count, show the button
-    else                                                                               -- ELSE
-        GLOBALS.ShowLog_Counter = GLOBALS.ShowLog_Counter+1                            --    count up.  Button is not shown yet.   
+    GLOBALS.look_for_state = LOOK_START_MELT                        -- Inits the 'look_for_state' StateMachine in CMD_Melt_Monitor_Log()
+    GLOBALS.times_no_data  = 0                                      -- For Recovery purposes: Counts up when there's no 1-second data available for reading
+    GLOBALS.CR_count       = 0                                      -- ***** Carriage-Return count.   Need 2 of them to complete a single line  ******
+    GLOBALS.TT             = {}                                     -- Table where data is accumulated.  'TT' named to distinguish from name 'T'
+    GLOBALS.main_state     = MSTATE_MELT_MONITOR_AND_LOG            -- Timer State, so calls CMD_Make_Monitor_Log()
+    GLOBALS.timer1.run     = "YES"                                  -- go,go,gadget!
+end
+
+
+function  do_make_melt_common_Input( Simg )
+    local SS,Status; local G=GLOBALS
+
+    do_color_toggle(Simg)                                                    -- yellow/gray visual ticker on the Dialog. Says: 'I'm alive'
+
+    if G.ShowLog_Counter == 4 then                                           -- counter controls when the 'Show File' Button will appear
+        G.ShowLog_Counter = G.ShowLog_Counter+1                              --    count up.  Button is not shown yet.   
+        Show_LogFile_Button()                                                --    got the count, show the button
+    else                                                                     -- ELSE
+        G.ShowLog_Counter = G.ShowLog_Counter+1                              --    count up.  Button is not shown yet.   
     end
 
-    while GLOBALS.CR_count < 2 do                                                      -- Keep receiving until 2 Carriage-Returns are received
-        SS,Status = GLOBALS.conn:receive(1)                                            --    Receive a single character
-        if SS ~= nil then                                                              --    Is the char received valid?
-            GLOBALS.TT[#GLOBALS.TT+1] = SS                                             --       Yes:   Add char to array 'TT'
-            if SS:byte() == 13 then GLOBALS.CR_count=GLOBALS.CR_count+1 end            --       Add to count if char was <Carriage-Return>
+    while G.CR_count < 2 do                                                  -- Keep receiving until 2 Carriage-Returns are received
+        SS,Status = G.conn:receive(1)                                        --    Receive a single character
+        if SS ~= nil then                                                    --    Is the char received valid?
+            G.TT[#G.TT+1] = SS                                               --       Yes:   Add char to array 'TT'
+            if SS:byte() == 13 then G.CR_count=G.CR_count+1 end              --       Add to count if char was <Carriage-Return>
         end
-        if Status == 'timeout' then break end                                          -- Quite loop is Status indicates timeout
+        if Status == 'timeout' then break end                                -- Quite loop is Status indicates timeout
     end
+end
+
+function do_make_melt_common_Output( SS )
+    local G=GLOBALS
+    if G.LogfileFD ~= '' then                                                -- corner case in terminate(), when idle
+        G.LogfileFD:write(SS)                                                -- EVERYTHING gets written to the Logfile
+        G.LogfileFD:flush()                                                  -- so it REALLY gets written!
+    end
+    if G.mout_count == 5 then                                                -- Simple count method to limit messages on the screen
+        G.mout_count = 1                                                     --   re-init
+        io.write(SS)                                                         --   writes it out to the screen
+        io.flush()                                                           --   AND forces it out the chute!
+    else
+        G.mout_count = G.mout_count + 1                                      -- count it up
+    end
+    G.times_no_data = 0                                                      -- We got data, so this indicator can be reset
+end
+
+
+-- called from Timer.  Monitors and Logs the 1-sec data from the Make
+function CMD_Melt_Monitor_Log()
+
+    do_make_melt_common_Input( img_MeltResult )                                        -- Image Toggle on the Melt result
 
     if #GLOBALS.TT > 1 and GLOBALS.CR_count == 2 then                                  -- IF more than 1 char in the buffer AND 2 <cr>'s have been received
 
         GLOBALS.CR_count = 0                                                           -- Re-init the <cr> count
-        SS               = table.concat(GLOBALS.TT)                                    -- All the bytes go into making string SS
+        local SS         = table.concat(GLOBALS.TT)                                    -- All the bytes go into making string SS
+        GLOBALS.TT       = {}                                                          -- done with array TT, can now re-initialize it
+
+        if GLOBALS.look_for_state == LOOK_START_MELT then                              -- Start running through the state machine here
+            if SS:find("Start Melt") ~= nil then                                       --   'Start Melt' will be in the data as an event
+                GLOBALS.look_for_state = LOOK_RPM_FINAL_VALUE                          --   on to the next state
+                lbl_SM.title   =  "Melt, Looking for 'RPM final value'"                --   updates the status message on the Dialog
+                extract_StartTime(SS)                                                  --   gets time from the "TM=" field in the data
+            end
+        elseif GLOBALS.look_for_state == LOOK_RPM_FINAL_VALUE then                     -- Are we in this state?
+            if SS:find("RPM to final value") ~= nil then                               --   when 'RPM to final value', the melt is Melting!
+                GLOBALS.look_for_state = LOOK_MELT_COMPLETE                            --   Looking next to be done
+                lbl_SM.title   =  "Melt, Looking for 'Melt complete'"                  --   update Status Message
+            end
+        elseif GLOBALS.look_for_state == LOOK_MELT_COMPLETE then                       -- Melt is on-going.  Looking for 'Melt complete'
+
+            if SS:find("Melt complete") ~= nil then                                    -- Looking for this in the data stream
+                GLOBALS.Got_Melt_Complete = true                                       --   so Status Image turns green
+                GLOBALS.look_for_state    = LOOK_NONE                                  --   done, so not lookin for anything
+                lbl_SM.title              = "Melt complete"                            --   shown on the Dialog
+                GLOBALS.main_state        = MSTATE_DO_TERMINATE_MELT                   --   state machine the terminate function
+                GLOBALS.terminate_count   = 0                                          --   state machine uses this to count
+                GLOBALS.conn:send("setcvar('SingleMelt','0')\n")                       --   Melt is OFF
+            else                                                                       -- ELSE, Melt is not yet complete
+                Do_Status_Message(SS,'Melt')                                           --   Shows SYp, TWt, elapsed time
+            end
+        end
+
+        do_make_melt_common_Output( SS )                                               -- Logs to File and to screen
+
+    else                                                                               -- ELSE we got no data: Zilcho
+        GLOBALS.times_no_data = GLOBALS.times_no_data + 1                              --   Number of consecutive times reading NO data
+        if GLOBALS.times_no_data > 100 then                                            --   Get to 100 and Houston, we have a problem
+            GLOBALS.times_no_data = 0                                                  --      This is where recovery should happen
+            SysPrint( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
+        end
+    end
+
+    GLOBALS.timer1.run = "YES"                                                         -- Must do this to keep the timer running, so that
+                                                                                       --    this routine gets called continually
+end
+
+
+
+-- called from Timer.  Monitors and Logs the 1-sec data from the Make
+function CMD_Make_Monitor_Log()
+
+    do_make_melt_common_Input(img_MakeResult)
+
+    if #GLOBALS.TT > 1 and GLOBALS.CR_count == 2 then                                  -- IF more than 1 char in the buffer AND 2 <cr>'s have been received
+
+        GLOBALS.CR_count = 0                                                           -- Re-init the <cr> count
+        local SS         = table.concat(GLOBALS.TT)                                    -- All the bytes go into making string SS
         GLOBALS.TT       = {}                                                          -- done with array TT, can now re-initialize it
 
         if GLOBALS.look_for_state == LOOK_START_MAKE then                              -- Start running through the state machine here
@@ -488,41 +624,18 @@ function CMD_Make_Monitor_Log()
                 GLOBALS.terminate_count   = 0                                          --   state machine uses this to count
                 GLOBALS.conn:send("setcvar('SingleMake','0')\n")                       --   Make is OFF
             else                                                                       -- ELSE, make is not yet complete
-                if GLOBALS.mout_count == 5 then                                        --   Count so that Screen output is every 5 seconds
-                    local n1,n2,S1,S2,S3
-                    S1="x";S2="x"                                                      --   Init to something/anything
-                    n1 = SS:find("SYp="); if n1 ~= nil then                            --   Look for 'SYp' in the data
-                        n2 = SS:find("CSp",n1)                                         --      Found 'SYp'.  Now find 'CSp'
-                        if n2 ~= nil then S1 = SS:sub(n1+4,n2-2) end                   --      Found both SYp and CSp. This extracts SYp value
-                    end
-                    n1 = SS:find("TWt="); if n1 ~= nil then                            --   Look for 'TWt' in the data
-                        n2 = SS:find("CBt",n1)                                         --      Found 'TWt'.  Now find 'CBt'
-                        if n2 ~= nil then S2 = SS:sub(n1+4,n2-2) end                   --      Found both TWt and CBt. This extracts TWt value
-                    end
-                    S3= get_elapsed_time(SS)
-                    lbl_SM.title = string.format("Make, SYp=%s TWt=%s  (%s)",ltrim(S1),ltrim(S2),S3)     -- Show SYp and TWt as Status Msg on the Dialog
-                end
+                Do_Status_Message(SS,'Make')                                           --   Shows SYp, TWt, elapsed time
             end
 
         end
 
-        GLOBALS.LogfileFD:write(SS)                                                    -- EVERYTHING gets written to the Logfile
-        GLOBALS.LogfileFD:flush()                                                      -- so it REALLY gets written!
-        if GLOBALS.mout_count == 5 then                                                -- Simple count method to limit messages on the screen
-            GLOBALS.mout_count = 0                                                     --   re-init
-            io.write(SS)                                                               --   writes it out to the screen
-            io.flush()                                                                 --   AND forces it out the chute!
-        else
-            GLOBALS.mout_count = GLOBALS.mout_count + 1                                -- count it up
-        end
-        GLOBALS.times_no_data = 0                                                      -- We got data, so this indicator can be reset
+        do_make_melt_common_Output(SS)
 
     else                                                                               -- ELSE we got no data: Zilcho
         GLOBALS.times_no_data = GLOBALS.times_no_data + 1                              --   Number of consecutive times reading NO data
         if GLOBALS.times_no_data > 100 then                                            --   Get to 100 and Houston, we have a problem
             GLOBALS.times_no_data = 0                                                  --      This is where recovery should happen
-            io.write( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
-            io.flush()                                                                 --      This is where recovery should happen
+            SysPrint( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
         end
     end
 
@@ -534,47 +647,61 @@ end
 --
 --
 --
-function CMD_Do_Terminate()
+function CMD_Do_Terminate(mType)
+    local G=GLOBALS
 
-    GLOBALS.terminate_count = GLOBALS.terminate_count + 1
+    G.terminate_count = G.terminate_count + 1
 
-    if GLOBALS.terminate_count == 1 then
-        if GLOBALS.main_state == MSTATE_DO_TERMINATE_MAKE then
-            GLOBALS.conn:send("setcvar('SingleMelt','0')\n");       os_sleep(200);  rddump()
+    if G.terminate_count == 1 then
+        if mType == DEF_MAKE then
+            G.conn:send("setcvar('SingleMelt','0')\n");       os_sleep(200);  rddump()
         else
-            GLOBALS.conn:send("setcvar('SingleMake','0')\n");       os_sleep(200);  rddump()
+            G.conn:send("setcvar('SingleMake','0')\n");       os_sleep(200);  rddump()
         end
-    elseif GLOBALS.terminate_count == 2 then
-        GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os_sleep(200);  rddump()
-    elseif GLOBALS.terminate_count == 3 then
-        GLOBALS.conn:send("setcvar('AlwaysDisallowMake','1')\n");   os_sleep(200);  rddump()
+    elseif G.terminate_count == 2 then
+        G.conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os_sleep(200);  rddump()
+    elseif G.terminate_count == 3 then
+        G.conn:send("setcvar('AlwaysDisallowMake','1')\n");   os_sleep(200);  rddump()
     end
 
-    if GLOBALS.terminate_count <= 7 then                                  -- this gives it awhile for data to come in
-        CMD_Make_Monitor_Log()                                            -- sucks up data, gets the timer going again
-    else
-        GLOBALS.main_state = MSTATE_CMD_NONE                              -- termination done.  state = idle
-
-        if GLOBALS.Got_Make_Complete == true then                         -- termination due to Make Complete ?
-            img_MakeResult.image  = IMG_GREEN                             --     Yes!  Change Status Image to Green
-            GLOBALS.Got_Make_Complete = false                             --     re-init the flag
+    if G.terminate_count <= 7 then                                  -- this gives it awhile for data to come in
+        if mType == DEF_MAKE then
+            CMD_Make_Monitor_Log()                                  -- sucks up data, gets the timer going again
         else
-            img_MakeResult.image  = IMG_GRAY                              --     the Gray indicates 'not yet complete'
+            CMD_Melt_Monitor_Log()                                  -- sucks up data, gets the timer going again
+        end
+    else
+        G.main_state = MSTATE_CMD_NONE                              -- termination done.  state = idle
+
+        if mType == DEF_MAKE then
+            if G.Got_Make_Complete == true then                     -- termination due to Make Complete ?
+                img_MakeResult.image  = IMG_GREEN                   --     Yes!  Change Status Image to Green
+                G.Got_Make_Complete = false                         --     re-init the flag
+            else
+                img_MakeResult.image  = IMG_GRAY                    --     the Gray indicates 'not yet complete'
+            end
+        else
+            if G.Got_Melt_Complete == true then                     -- termination due to Make Complete ?
+                img_MeltResult.image  = IMG_GREEN                   --     Yes!  Change Status Image to Green
+                G.Got_Melt_Complete = false                         --     re-init the flag
+            else
+                img_MeltResult.image  = IMG_GRAY                    --     the Gray indicates 'not yet complete'
+            end
         end
 
-        GLOBALS.color_toggle = COLOR_GRAY                                 -- So toggle knows what the current state is
+        G.color_toggle = COLOR_GRAY                                 -- So toggle knows what the current state is
 
-        if GLOBALS.LogfileFD ~= '' then
-            GLOBALS.LogfileFD:close()                                         -- Logfile officially closed
-            GLOBALS.LogfileFD = ''
-            GLOBALS.Fname     = ''
+        if G.LogfileFD ~= '' then
+            G.LogfileFD:close()                                     -- Logfile officially closed
+            G.LogfileFD = ''
+            G.Fname     = ''
         end
 
-        SysPrint( "------------------   Terminate\n" )                    -- visual indicator both in syslog and screen
-        GLOBALS.conn:send("setcvar('SysProductionMode','0')\n");          -- This will turn Off the 1-second data
-        os_sleep(200)                                                     -- very short sleep
-        rdshow()                                                          -- Suck up all the data
-        lbl_SM.title = "Idle"                                             -- Shows 'Idle' on the Dialog
+        SysPrint( "------------------   Terminate\n" )              -- visual indicator both in syslog and screen
+        G.conn:send("setcvar('SysProductionMode','0')\n");          -- This will turn Off the 1-second data
+        os_sleep(200)                                               -- very short sleep
+        rdshow()                                                    -- Suck up all the data
+        lbl_SM.title = "Idle"                                       -- Shows 'Idle' on the Dialog
     end
 end
 
@@ -588,9 +715,11 @@ function GLOBALS.timer1:action_cb()
     if     GLOBALS.main_state == MSTATE_CMD_TEST_CONN1            then   CMD_Test_Conn1()
     elseif GLOBALS.main_state == MSTATE_CMD_GET_SERIALNUM         then   CMD_Get_SerialNum()
     elseif GLOBALS.main_state == MSTATE_MAKE_PRE_MONITOR_AND_LOG  then   CMD_Make_Pre_Monitor_Log()
+    elseif GLOBALS.main_state == MSTATE_MELT_PRE_MONITOR_AND_LOG  then   CMD_Melt_Pre_Monitor_Log()
     elseif GLOBALS.main_state == MSTATE_MAKE_MONITOR_AND_LOG      then   CMD_Make_Monitor_Log()
-    elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MAKE         then   CMD_Do_Terminate()
-    elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MELT         then   CMD_Do_Terminate()
+    elseif GLOBALS.main_state == MSTATE_MELT_MONITOR_AND_LOG      then   CMD_Melt_Monitor_Log()
+    elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MAKE         then   CMD_Do_Terminate(DEF_MAKE)
+    elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MELT         then   CMD_Do_Terminate(DEF_MELT)
     end
 
     return iup.DEFAULT
@@ -663,11 +792,62 @@ function btn_cb_Make(self)
       lbl_SM.title            = "Make, Looking for 'Start Make'"                       -- update the Log Msg on the Dialog
       btn_ShowLog.visible     = "NO"                                                   -- Showlog button disappears
       GLOBALS.ShowLog_Counter = 0                                                      -- count for when Showlog Btn appears again
+      GLOBALS.Got_Make_Complete = false
 
   end
 
   return iup.DEFAULT
 end
+
+
+
+function btn_cb_Melt(self)
+  local T,s1,fname
+
+  SysPrint(os.date() .. ':  btn Melt\n')                                               -- Records the btn press
+
+  if GLOBALS.main_state == MSTATE_CMD_NONE then                                        -- NOP unless idle
+
+      if GLOBALS.First_Comms_Has_Run == false or GLOBALS.First_Comms_Addr ~= IP_tbox.value then    -- Connectivity to the board ??
+          if common_CMD_Test_Conn1() == 0 then                                                     --    Try to connect
+              iup.Message("Socket Error", "ERROR!\n\rconn:connect()")                              --    error message if unsuccessful
+              return iup.DEFAULT                                                                   --    No comms. Did not make
+          end
+      end
+
+      s1 = SN_tbox.value                                                               -- Retrieve/Validate the SerialNumber
+      if s1:len() ~= 5 or s1:find('%d%d%d%d%d') == nil then                            -- Looking for 5 numeric digits
+          iup.Message("BAD S/N", "ERROR!\n\rS/N is 5 Digits")                          -- Error Message Pops up
+          return iup.DEFAULT
+      end
+
+      T = os.date("*t",os.time())                                                      -- Assign Filename based on SN
+      fname = string.format(FNAME_FMT,DEFAULT_DIRECTORY,SN_tbox.value,T.year,T.month,T.day,T.hour,T.min,T.sec)
+      GLOBALS.Fname = fname
+
+      GLOBALS.LogfileFD = io.open(fname, 'w');                                         -- Open up the LogFile for writing
+      if GLOBALS.LogfileFD == nil then                                                 -- Test for Error
+          GLOBALS.Fname     = ''
+          GLOBALS.LogfileFD = ''
+          iup.Message("file open error", "ERROR opening:\n\r" .. fname)                -- Show Error message
+          return iup.DEFAULT                                                           -- due to error, make was not entered
+      end
+
+      GLOBALS.main_state        = MSTATE_MELT_PRE_MONITOR_AND_LOG                      -- This will send the commands
+      GLOBALS.timer1.time       = 300                                                  -- timer at 300 milliseconds
+      GLOBALS.timer1.run        = "YES"                                                -- timer1 will run 
+      lbl_SM.title              = "Melt, Looking for 'Start Melt'"                     -- update the Log Msg on the Dialog
+      btn_ShowLog.visible       = "NO"                                                 -- Showlog button disappears
+      GLOBALS.ShowLog_Counter   = 0                                                    -- count for when Showlog Btn appears again
+      GLOBALS.Got_Melt_Complete = false
+
+  end
+
+  return iup.DEFAULT
+end
+
+
+
 
 function btn_cb_Terminate(self)
     SysPrint(os.date() .. ':  btn Terminate\n')
@@ -809,6 +989,7 @@ lbl_SM   = iup.label { title =  GLOBAL_STATUS,                       ALIGNMENT="
 lbl_ST   = iup.label { title = " Status:  ",                         ALIGNMENT="ALEFT", font = "COURIER_NORMAL_14" }
 
 img_MakeResult = iup.label { image = IMG_GRAY, ALIGNMENT="ARIGHT:ABOTTOM" }
+img_MeltResult = iup.label { image = IMG_GRAY, ALIGNMENT="ARIGHT:ABOTTOM" }
 img_C = iup.label { image = IMG_GRAY, ALIGNMENT="ARIGHT:ABOTTOM" }
 
 
@@ -843,6 +1024,14 @@ btn_Make = iup.button {
     visible       = "YES",
 }
 
+btn_Melt = iup.button {
+    title         = " Melt ",
+    action        = btn_cb_Melt,
+    font          = "COURIER_NORMAL_14",
+    impressborder = "YES",
+    visible       = "YES",
+}
+
 btn_Terminate = iup.button {
     title         = " Terminate ",
     action        = btn_cb_Terminate,
@@ -858,7 +1047,8 @@ lbl_empt02 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt03 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt04 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt05 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
-lbl_empt06 = iup.label { title = "           ",  ALIGNMENT="ARIGHT:ATOP" }
+lbl_empt06 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
+lbl_empt07 = iup.label { title = "       ",      ALIGNMENT="ARIGHT:ATOP" }
 lbl_empt1  = iup.label { title = "            ", ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_empt2  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_empt3  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP" }
@@ -874,15 +1064,18 @@ lbl_emptK  = iup.label { title = " ",            ALIGNMENT="ARIGHT:ATOP", font="
 lbl_emptL  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptN  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptO  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptP  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptQ  = iup.label { title = "    ",         ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptF  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_emptH  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 lbl_vers   = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 
-lbl_emptM  = iup.label { title = "                                            ",  ALIGNMENT="ARIGHT:ATOP" }
+lbl_emptM  = iup.label { title = "          ",   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 
 IP_tbox = iup.text{size="80x",value=DEFAULT_IPADDR,font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 SN_tbox = iup.text{size="60x",value="",            font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 
+tgl_Both = iup.toggle{ title="both",  value="OFF", font="COURIER_NORMAL_11", leftbutton="YES"  }
 
 
 
@@ -923,7 +1116,8 @@ dlg = iup.dialog {
                     iup.hbox{lbl_SN,SN_tbox,lbl_emptL,btn_GetSN},
                     iup.hbox{lbl_2},
                     iup.hbox{lbl_empt4},
-                    iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptM,btn_Terminate},
+                    iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,
+                                  lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate},
                     iup.hbox{lbl_empt5},
                     iup.hbox{lbl_emptO},
                     iup.hbox{lbl_ST,lbl_SM},
