@@ -564,7 +564,7 @@ function CMD_Melt_Monitor_Log()
             end
         elseif GLOBALS.look_for_state == LOOK_MELT_COMPLETE then                       -- Melt is on-going.  Looking for 'Melt complete'
 
-            if SS:find("Melt complete") ~= nil then                                    -- Looking for this in the data stream
+            if SS:find("to Melt Idle") ~= nil then                                     -- Looking for this in the data stream
                 GLOBALS.Got_Melt_Complete = true                                       --   so Status Image turns green
                 GLOBALS.look_for_state    = LOOK_NONE                                  --   done, so not lookin for anything
                 lbl_SM.title              = "Melt complete"                            --   shown on the Dialog
@@ -1167,7 +1167,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing   1.05",
+  title = "Bear Performance Testing   1.06",
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
