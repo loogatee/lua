@@ -5,6 +5,17 @@ DEFAULT_IPADDR    = "10.0.107.107"
 PORT_TO_USE       = 23
 
 
+Pressures_Table = {
+
+     '80.0',
+     '81.0',
+     '82.0',
+     '82.5',
+     '83.0',
+     '83.5',
+
+}
+
 
 
 require( "iuplua" )
@@ -25,6 +36,7 @@ bit = require( "bit" )
 if package.config:sub(1,1)  == '/' then
 
     DEFAULT_DIRECTORY = "/tmp/zPerfFiles"
+    JMAGIC_DIRECTORY  = "/tmp/jmagic"
     SYSLOG_PATH       = DEFAULT_DIRECTORY .. "/APerfSysLog.txt"
     FNAME_FMT         = "%s/M%s_%d%02d%02d_%02d%02d%02d.txt"
     GLOBAL_STATUS     = "None                                               "
@@ -39,12 +51,13 @@ else
     shell32.ShellExecuteA:types("pointer","pointer","pointer","pointer", "pointer","pointer","int")
     SHexec = shell32.ShellExecuteA
 
-    SYSLOG_PATH     = DEFAULT_DIRECTORY .. "\\APerfSysLog.txt"
-    OUTFILES_PATH   = DEFAULT_DIRECTORY .. "\\tmp"
-    C9_PATH         = OUTFILES_PATH     .. "\\cmd_9.vbs"
-    FNAME_FMT       = "%s\\M%s_%d%02d%02d_%02d%02d%02d.txt"
-    GLOBAL_STATUS   = "None                                              "
-    GLOBAL_OSTYPE   = 'WINDOWS'
+    SYSLOG_PATH      = DEFAULT_DIRECTORY .. "\\APerfSysLog.txt"
+    OUTFILES_PATH    = DEFAULT_DIRECTORY .. "\\tmp"
+    C9_PATH          = OUTFILES_PATH     .. "\\cmd_9.vbs"
+    JMAGIC_DIRECTORY = DEFAULT_DIRECTORY .. "\\jmagic"
+    FNAME_FMT        = "%s\\M%s_%d%02d%02d_%02d%02d%02d.txt"
+    GLOBAL_STATUS    = "None                                              "
+    GLOBAL_OSTYPE    = 'WINDOWS'
 
 end
 
@@ -205,23 +218,38 @@ GLOBALS = {
              mout_count          = 1,
              CR_count            = 0,
              terminate_count     = 0,
+             PTindex             = 0,
              LogfileFD           = '',
              SyslogFD            = '',
              First_Comms_Addr    = '',
              conn                = '',
              Fname               = '',
              Button_Fname        = '',
+             Dtitle              = '',
              dotogg              = false,
              First_Comms_Has_Run = false,
              Got_Make_Complete   = false,
              Got_Melt_Complete   = false,
              do_screen_output    = false,
+             TerminateNow        = false,
              TT                  = {},
+             Hbox                = {},
              timer1              = iup.timer{ time=1000,  run="NO" },               -- 1000 is 1 second
              StartTime           = {0,0,0}
 }
 
 
+function jmagic()
+    if isdir(JMAGIC_DIRECTORY) ~= nil then
+        if GLOBAL_OSTYPE == 'WINDOWS' then
+            os.rmdir(JMAGIC_DIRECTORY)
+        else
+            os.execute('rmdir ' .. JMAGIC_DIRECTORY)
+        end
+        return true
+    end
+    return false
+end
 
 
 --  parm is in milliseconds.  500 = 1/2 second
@@ -469,18 +497,38 @@ end
 
 -- CDC Setup PLUS global variable setup for running Make
 function CMD_Make_Pre_Monitor_Log()
-    GLOBALS.conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()      -- Make ONLY.  This dis-allows Melt
-    GLOBALS.conn:send("setcvar('AlwaysDisallowMake','0')\n");  os_sleep(200); rddump()      -- Turns OFF the dis-allow on Make
-    GLOBALS.conn:send("setcvar('SingleMelt',        '0')\n");  os_sleep(200); rddump()      -- SingleMelt has to be OFF when Making
-    GLOBALS.conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()      -- Turns ON the data stream
-    GLOBALS.conn:send("setcvar('SingleMake',        '1')\n");  os_sleep(200); rddump()      -- Turns ON the Make
+    local G=GLOBALS
 
-    GLOBALS.look_for_state = LOOK_START_MAKE                        -- Inits the 'look_for_state' StateMachine in CMD_Make_Monitor_Log()
-    GLOBALS.times_no_data  = 0                                      -- For Recovery purposes: Counts up when there's no 1-second data available for reading
-    GLOBALS.CR_count       = 0                                      -- ***** Carriage-Return count.   Need 2 of them to complete a single line  ******
-    GLOBALS.TT             = {}                                     -- Table where data is accumulated.  'TT' named to distinguish from name 'T'
-    GLOBALS.main_state     = MSTATE_MAKE_MONITOR_AND_LOG            -- Timer State, so calls CMD_Make_Monitor_Log()
-    GLOBALS.timer1.run     = "YES"                                  -- go,go,gadget!
+    if Pressures_Table ~= nil then
+        G.PTindex = G.PTindex + 1
+
+        if G.LogfileFD ~= '' then
+            G.LogfileFD:write('=============== MakeEndPressure ' .. Pressures_Table[G.PTindex] .. '===========\n')
+            G.LogfileFD:flush()
+        end
+
+        local b='( ' .. Pressures_Table[G.PTindex] .. ' )'
+        lbl_press.title = string.format('%11s',b)
+
+        local S = 'ConfigData.CONTROL_VARIABLES.MakeEndPressure=' .. Pressures_Table[G.PTindex] .. ';wconfig()\n'
+
+        G.conn:send(S);  os_sleep(400); rddump()
+    end
+
+
+
+    G.conn:send("setcvar('AlwaysDisallowMelt','1')\n");  os_sleep(200); rddump()      -- Make ONLY.  This dis-allows Melt
+    G.conn:send("setcvar('AlwaysDisallowMake','0')\n");  os_sleep(200); rddump()      -- Turns OFF the dis-allow on Make
+    G.conn:send("setcvar('SingleMelt',        '0')\n");  os_sleep(200); rddump()      -- SingleMelt has to be OFF when Making
+    G.conn:send("setcvar('SysProductionMode', '3')\n");  os_sleep(200); rddump()      -- Turns ON the data stream
+    G.conn:send("setcvar('SingleMake',        '1')\n");  os_sleep(200); rddump()      -- Turns ON the Make
+
+    G.look_for_state = LOOK_START_MAKE                        -- Inits the 'look_for_state' StateMachine in CMD_Make_Monitor_Log()
+    G.times_no_data  = 0                                      -- For Recovery purposes: Counts up when there's no 1-second data available for reading
+    G.CR_count       = 0                                      -- ***** Carriage-Return count.   Need 2 of them to complete a single line  ******
+    G.TT             = {}                                     -- Table where data is accumulated.  'TT' named to distinguish from name 'T'
+    G.main_state     = MSTATE_MAKE_MONITOR_AND_LOG            -- Timer State, so calls CMD_Make_Monitor_Log()
+    G.timer1.run     = "YES"                                  -- go,go,gadget!
 end
 
 
@@ -552,19 +600,19 @@ function CMD_Melt_Monitor_Log()
         GLOBALS.TT       = {}                                                          -- done with array TT, can now re-initialize it
 
         if GLOBALS.look_for_state == LOOK_START_MELT then                              -- Start running through the state machine here
-            if SS:find("Start Melt") ~= nil then                                       --   'Start Melt' will be in the data as an event
+            if SS:find("Start Melt") ~= nil or jmagic() == true then                   --   'Start Melt' will be in the data as an event
                 GLOBALS.look_for_state = LOOK_RPM_FINAL_VALUE                          --   on to the next state
                 lbl_SM.title   =  "Melt, Looking for 'RPM final value'"                --   updates the status message on the Dialog
                 extract_StartTime(SS)                                                  --   gets time from the "TM=" field in the data
             end
         elseif GLOBALS.look_for_state == LOOK_RPM_FINAL_VALUE then                     -- Are we in this state?
-            if SS:find("RPM to final value") ~= nil then                               --   when 'RPM to final value', the melt is Melting!
+            if SS:find("RPM to final value") ~= nil or jmagic() == true then           --   when 'RPM to final value', the melt is Melting!
                 GLOBALS.look_for_state = LOOK_MELT_COMPLETE                            --   Looking next to be done
                 lbl_SM.title   =  "Melt, Looking for 'Melt complete'"                  --   update Status Message
             end
         elseif GLOBALS.look_for_state == LOOK_MELT_COMPLETE then                       -- Melt is on-going.  Looking for 'Melt complete'
 
-            if SS:find("to Melt Idle") ~= nil then                                     -- Looking for this in the data stream
+            if SS:find("to Melt Idle") ~= nil or jmagic() == true then                 -- Looking for this in the data stream
                 GLOBALS.Got_Melt_Complete = true                                       --   so Status Image turns green
                 GLOBALS.look_for_state    = LOOK_NONE                                  --   done, so not lookin for anything
                 lbl_SM.title              = "Melt complete"                            --   shown on the Dialog
@@ -604,19 +652,19 @@ function CMD_Make_Monitor_Log()
         GLOBALS.TT       = {}                                                          -- done with array TT, can now re-initialize it
 
         if GLOBALS.look_for_state == LOOK_START_MAKE then                              -- Start running through the state machine here
-            if SS:find("Start Make") ~= nil then                                       --   'Start Make' will be in the data as an event
+            if SS:find("Start Make") ~= nil or jmagic() == true then                   --   'Start Make' will be in the data as an event
                 GLOBALS.look_for_state = LOOK_EEV_CONTROL_ACTIVE                       --   on to the next state
                 lbl_SM.title   =  "Make, Looking for 'EEV control active'"             --   updates the status message on the Dialog
                 extract_StartTime(SS)
             end
         elseif GLOBALS.look_for_state == LOOK_EEV_CONTROL_ACTIVE then                  -- Are we in this state?
-            if SS:find("EEV control active") ~= nil then                               --   when 'EEV control active', the make is Making!
+            if SS:find("EEV control active") ~= nil or jmagic() == true then           --   when 'EEV control active', the make is Making!
                 GLOBALS.look_for_state = LOOK_MAKE_COMPLETE                            --   Looking next to be done
                 lbl_SM.title   =  "Make, Looking for 'Make complete'"                  --   update Status Message
             end
         elseif GLOBALS.look_for_state == LOOK_MAKE_COMPLETE then                       -- Make is on-going.  Looking for 'Make complete'
 
-            if SS:find("Make complete") ~= nil then                                    -- Looking for this in the data stream
+            if SS:find("Make complete") ~= nil or jmagic() == true then                -- Looking for this in the data stream
                 GLOBALS.Got_Make_Complete = true                                       --   so Status Image turns green
                 GLOBALS.look_for_state    = LOOK_NONE                                  --   done, so not lookin for anything
                 lbl_SM.title              = "Make complete"                            --   shown on the Dialog
@@ -672,18 +720,35 @@ end
 function CMD_Do_Terminate(mType)
     local G=GLOBALS
 
+                   function common_do_def_none()
+                       local G=GLOBALS
+
+                       if G.LogfileFD ~= '' then
+                           G.LogfileFD:close()                                     -- Logfile officially closed
+                           G.LogfileFD = ''
+                           G.Fname     = ''
+                       end
+
+                       SysPrint( "------------------   Terminate\n" )              -- visual indicator both in syslog and screen
+                       G.conn:send("setcvar('SysProductionMode','0')\n");          -- This will turn Off the 1-second data
+                       os_sleep(300)                                               -- very short sleep
+                       rdshow()                                                    -- Suck up all the data
+                       lbl_SM.title = "Idle"                                       -- Shows 'Idle' on the Dialog
+                   end
+
+
     G.terminate_count = G.terminate_count + 1
 
     if G.terminate_count == 1 then
         if mType == DEF_MAKE then
-            G.conn:send("setcvar('SingleMelt','0')\n");       os_sleep(200);  rddump()
+            G.conn:send("setcvar('SingleMelt','0')\n");       os_sleep(300);  rddump()
         else
-            G.conn:send("setcvar('SingleMake','0')\n");       os_sleep(200);  rddump()
+            G.conn:send("setcvar('SingleMake','0')\n");       os_sleep(300);  rddump()
         end
     elseif G.terminate_count == 2 then
-        G.conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os_sleep(200);  rddump()
+        G.conn:send("setcvar('AlwaysDisallowMelt','1')\n");   os_sleep(300);  rddump()
     elseif G.terminate_count == 3 then
-        G.conn:send("setcvar('AlwaysDisallowMake','1')\n");   os_sleep(200);  rddump()
+        G.conn:send("setcvar('AlwaysDisallowMake','1')\n");   os_sleep(300);  rddump()
     end
 
     if G.terminate_count <= 7 then                                  -- this gives it awhile for data to come in
@@ -713,20 +778,26 @@ function CMD_Do_Terminate(mType)
 
         G.color_toggle = COLOR_GRAY                                 -- So toggle knows what the current state is
 
-        if G.Next_state == DEF_NONE then
+        if Pressures_Table ~= nil and G.TerminateNow == false then
 
-            if G.LogfileFD ~= '' then
-                G.LogfileFD:close()                                     -- Logfile officially closed
-                G.LogfileFD = ''
-                G.Fname     = ''
+            if G.Next_state == DEF_MELT then
+                common_Melt_kickoff( "YES", 5 )                             -- Should kick of a melt
+                G.Next_state = DEF_MAKE
+            else
+                if G.PTindex == #Pressures_Table then
+                     G.PTindex = 0
+                     SysPrint("======== DONE at all Pressures ========")
+                     common_do_def_none()
+                else
+                     common_Make_kickoff( "YES", 5 )
+                     G.Next_state = DEF_MELT
+                end
             end
 
-            SysPrint( "------------------   Terminate\n" )              -- visual indicator both in syslog and screen
-            G.conn:send("setcvar('SysProductionMode','0')\n");          -- This will turn Off the 1-second data
-            os_sleep(200)                                               -- very short sleep
-            rdshow()                                                    -- Suck up all the data
-            lbl_SM.title = "Idle"                                       -- Shows 'Idle' on the Dialog
 
+        elseif G.Next_state == DEF_NONE then
+            G.TerminateNow = false
+            common_do_def_none()
         elseif G.Next_state == DEF_MELT then
             common_Melt_kickoff( "YES", 5 )                             -- Should kick of a melt
             G.Next_state = DEF_NONE
@@ -737,6 +808,7 @@ function CMD_Do_Terminate(mType)
 
 
     end
+
 end
 
 
@@ -796,7 +868,6 @@ function common_Make_kickoff( slog_val, slog_cnt )
     btn_ShowLog.visible     = slog_val
     GLOBALS.ShowLog_Counter = slog_cnt                                               -- count for when Showlog Btn appears again
     GLOBALS.Got_Make_Complete = false
-    img_MeltResult.image      = IMG_GRAY                                             -- In case it was Green
 end
 
 
@@ -833,9 +904,10 @@ function btn_cb_Make(self)
           return iup.DEFAULT                                                           -- due to error, make was not entered
       end
 
+      img_MeltResult.image  = IMG_GRAY                                             -- In case it was Green
       common_Make_kickoff( "NO", 0 )
 
-      if tgl_Both.value == "ON" then
+      if tgl_Both.value == "ON" or Pressures_Table ~= nil then
           GLOBALS.Next_state = DEF_MELT
       else
           GLOBALS.Next_state = DEF_NONE
@@ -855,7 +927,6 @@ function common_Melt_kickoff( slog_val, slog_cnt )
     btn_ShowLog.visible       = slog_val                                             -- Showlog button disappears
     GLOBALS.ShowLog_Counter   = slog_cnt                                             -- count for when Showlog Btn appears again
     GLOBALS.Got_Melt_Complete = false
-    img_MakeResult.image      = IMG_GRAY                                             -- In case it was Green
 end
 
 
@@ -891,9 +962,10 @@ function btn_cb_Melt(self)
           return iup.DEFAULT                                                           -- due to error, make was not entered
       end
 
+      img_MakeResult.image      = IMG_GRAY                                             -- In case it was Green
       common_Melt_kickoff( "NO", 0 )
 
-      if tgl_Both.value == "ON" then
+      if tgl_Both.value == "ON" or Pressures_Table ~= nil then
           GLOBALS.Next_state = DEF_MAKE
       else
           GLOBALS.Next_state = DEF_NONE
@@ -906,27 +978,35 @@ end
 
 
 
-
 function btn_cb_Terminate(self)
+    local G=GLOBALS
     SysPrint(os.date() .. ':  btn Terminate\n')
 
-    if GLOBALS.main_state == MSTATE_MAKE_MONITOR_AND_LOG then            -- Currently in the 'Make' state ?
-        GLOBALS.main_state = MSTATE_DO_TERMINATE_MAKE                    --   state machine the terminate function
-        GLOBALS.conn:send("setcvar('SingleMake','0')\n")                 --   Stops the Make.  1-sec data still streaming
-        GLOBALS.terminate_count = 0                                      --   state machine uses this to count
-        lbl_SM.title    = "Terminating..."                               --   updates message on the Dialog
-    elseif GLOBALS.main_state == MSTATE_MELT_MONITOR_AND_LOG then        -- Currently in the 'Melt' state ?
-        GLOBALS.main_state = MSTATE_DO_TERMINATE_MELT                    --   state machine the terminate function
-        GLOBALS.conn:send("setcvar('SingleMelt','0')\n")                 --   Stops the Melt.  1-sec data still streaming
-        GLOBALS.terminate_count = 0                                      --   state machine uses this to count
-        lbl_SM.title    = "Terminating..."                               --   updates message on the Dialog
-    elseif GLOBALS.main_state == MSTATE_CMD_NONE and GLOBALS.First_Comms_Has_Run == true then
-        GLOBALS.main_state = MSTATE_DO_TERMINATE_MAKE                    --   state machine the terminate functionjjjj
-        GLOBALS.conn:send("setcvar('SingleMake','0')\n")                 --   Stops the Make.  1-sec data still streaming
-        GLOBALS.terminate_count = 0                                      --   state machine uses this to count
-        lbl_SM.title    = "Terminating..."                               --   updates message on the Dialog
-        GLOBALS.timer1.time = 200                                        -- timer will run in 100 milliseconds
-        GLOBALS.timer1.run  = "YES"                                      -- yep
+    G.PTindex = 0
+
+    if G.main_state == MSTATE_MAKE_MONITOR_AND_LOG then            -- Currently in the 'Make' state ?
+        G.main_state = MSTATE_DO_TERMINATE_MAKE                    --   state machine the terminate function
+        G.conn:send("setcvar('SingleMake','0')\n")                 --   Stops the Make.  1-sec data still streaming
+        G.Next_state      = DEF_NONE
+        G.terminate_count = 0                                      --   state machine uses this to count
+        G.TerminateNow    = true
+        lbl_SM.title      = "Terminating..."                       --   updates message on the Dialog
+    elseif G.main_state == MSTATE_MELT_MONITOR_AND_LOG then        -- Currently in the 'Melt' state ?
+        G.main_state = MSTATE_DO_TERMINATE_MELT                    --   state machine the terminate function
+        G.conn:send("setcvar('SingleMelt','0')\n")                 --   Stops the Melt.  1-sec data still streaming
+        G.Next_state      = DEF_NONE
+        G.terminate_count = 0                                      --   state machine uses this to count
+        G.TerminateNow    = true
+        lbl_SM.title      = "Terminating..."                       --   updates message on the Dialog
+    elseif G.main_state == MSTATE_CMD_NONE and G.First_Comms_Has_Run == true then
+        G.main_state = MSTATE_DO_TERMINATE_MAKE                    --   state machine the terminate functionjjjj
+        G.conn:send("setcvar('SingleMake','0')\n")                 --   Stops the Make.  1-sec data still streaming
+        G.Next_state      = DEF_NONE
+        G.terminate_count = 0                                      --   state machine uses this to count
+        G.TerminateNow    = true
+        lbl_SM.title      = "Terminating..."                       --   updates message on the Dialog
+        G.timer1.time     = 200                                    -- timer will run in 100 milliseconds
+        G.timer1.run      = "YES"                                  -- yep
     end
 
     return iup.DEFAULT
@@ -1129,13 +1209,23 @@ lbl_emptH  = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="
 lbl_vers   = iup.label { title = DIALOG_WIDTH,   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 
 lbl_emptM  = iup.label { title = "          ",   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
+lbl_emptM1 = iup.label { title = "    ",   ALIGNMENT="ARIGHT:ATOP", font="COURIER_NORMAL_14" }
 
 IP_tbox = iup.text{size="80x",value=DEFAULT_IPADDR,font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 SN_tbox = iup.text{size="60x",value="",            font="COURIER_NORMAL_12",ALIGNMENT="ACENTER"}
 
 tgl_Both = iup.toggle{ title="both",  value="OFF", font="COURIER_NORMAL_11", leftbutton="YES"  }
 
+lbl_press  = iup.label { title = "(Pressures)",  ALIGNMENT="ALEFT", font = "COURIER_NORMAL_14" }
 
+
+if Pressures_Table ~= nil then
+    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.08"
+    GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,lbl_press,lbl_emptM1,btn_Terminate}
+else
+    GLOBALS.Dtitle = "Bear Performance Testing   1.08"
+    GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate}
+end
 
 
 GLOBALS.conn = socket.tcp() 
@@ -1174,8 +1264,7 @@ dlg = iup.dialog {
                     iup.hbox{lbl_SN,SN_tbox,lbl_emptL,btn_GetSN},
                     iup.hbox{lbl_2},
                     iup.hbox{lbl_empt4},
-                    iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,
-                                  lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate},
+                    GLOBALS.Hbox,
                     iup.hbox{lbl_empt5},
                     iup.hbox{lbl_emptO},
                     iup.hbox{lbl_ST,lbl_SM},
@@ -1191,7 +1280,7 @@ dlg = iup.dialog {
      iup.hbox{lbl_empt02},
 
   },
-  title = "Bear Performance Testing   1.07",
+  title = GLOBALS.Dtitle,
 }
 
 dlg:showxy(iup.CENTER, iup.CENTER)
