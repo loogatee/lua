@@ -580,9 +580,9 @@ function CMD_Melt_Monitor_Log()
 
     else                                                                               -- ELSE we got no data: Zilcho
         GLOBALS.times_no_data = GLOBALS.times_no_data + 1                              --   Number of consecutive times reading NO data
-        if GLOBALS.times_no_data > 100 then                                            --   Get to 100 and Houston, we have a problem
+        if GLOBALS.times_no_data > 250 then                                            --   Get to 100 and Houston, we have a problem
             GLOBALS.times_no_data = 0                                                  --      This is where recovery should happen
-            SysPrint( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
+            PerformRecovery(DEF_MELT)                                                  --      This is where recovery should happen
         end
     end
 
@@ -633,14 +633,36 @@ function CMD_Make_Monitor_Log()
 
     else                                                                               -- ELSE we got no data: Zilcho
         GLOBALS.times_no_data = GLOBALS.times_no_data + 1                              --   Number of consecutive times reading NO data
-        if GLOBALS.times_no_data > 100 then                                            --   Get to 100 and Houston, we have a problem
+        if GLOBALS.times_no_data > 250 then                                            --   Get to 100 and Houston, we have a problem
             GLOBALS.times_no_data = 0                                                  --      This is where recovery should happen
-            SysPrint( "zzz 100 Times zzz\n" )                                          --      This is where recovery should happen
+            PerformRecovery(DEF_MAKE)                                                  --      This is where recovery should happen
         end
     end
 
     GLOBALS.timer1.run = "YES"                                                         -- Must do this to keep the timer running, so that
                                                                                        --    this routine gets called continually
+end
+
+function PerformRecovery(Rtype)                                                        --      This is where recovery should happen
+    SysPrint("PerformRecovery:  Sending RRRRR\n")
+
+    GLOBALS.conn:send("RRRRR\n");  os_sleep(3000);
+
+    if common_CMD_Test_Conn1() == 0 then                                               --    Try to connect
+        iup.Message("(Recovery)Socket Error", "ERROR!\n\rconn:connect()")              --    error message if unsuccessful
+        GLOBALS.main_state = MSTATE_CMD_NONE
+        return
+    end
+
+    SysPrint("PerformRecovery:  Connection OK\n")
+
+    if Rtype == DEF_MAKE then
+        SysPrint("PerformRecovery:  Make_kickoff\n")
+        common_Make_kickoff( "YES", 5 )
+    else
+        SysPrint("PerformRecovery:  Melt_kickoff\n")
+        common_Melt_kickoff( "YES", 5 )
+    end
 end
 
 
@@ -774,6 +796,7 @@ function common_Make_kickoff( slog_val, slog_cnt )
     btn_ShowLog.visible     = slog_val
     GLOBALS.ShowLog_Counter = slog_cnt                                               -- count for when Showlog Btn appears again
     GLOBALS.Got_Make_Complete = false
+    img_MeltResult.image      = IMG_GRAY                                             -- In case it was Green
 end
 
 
@@ -832,6 +855,7 @@ function common_Melt_kickoff( slog_val, slog_cnt )
     btn_ShowLog.visible       = slog_val                                             -- Showlog button disappears
     GLOBALS.ShowLog_Counter   = slog_cnt                                             -- count for when Showlog Btn appears again
     GLOBALS.Got_Melt_Complete = false
+    img_MakeResult.image      = IMG_GRAY                                             -- In case it was Green
 end
 
 
