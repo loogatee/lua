@@ -1220,10 +1220,10 @@ lbl_press  = iup.label { title = "(Pressures)",  ALIGNMENT="ALEFT", font = "COUR
 
 
 if Pressures_Table ~= nil then
-    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.08"
+    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.09"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,lbl_press,lbl_emptM1,btn_Terminate}
 else
-    GLOBALS.Dtitle = "Bear Performance Testing   1.08"
+    GLOBALS.Dtitle = "Bear Performance Testing   1.09"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate}
 end
 
