@@ -696,9 +696,8 @@ end
 function CMD_Do_Recovery()                                                        --      This is where recovery should happen
 
     if common_CMD_Test_Conn1() == 0 then                                               --    Try to connect
-        SysPrint("==== (Recovery)Socket Error", "ERROR!\n\rconn:connect()=====\n")     --    error message if unsuccessful
-        PerformRecovery(GLOBALS.RecoverType)
-        GLOBALS.timer1.run = "YES"                                                         -- Must do this to keep the timer running, so that
+        iup.Message("(Recovery)Socket Error", "ERROR!\n\rconn:connect()")              --    error message if unsuccessful
+        GLOBALS.main_state = MSTATE_CMD_NONE
         return
     end
 
@@ -717,9 +716,7 @@ function PerformRecovery(Rtype)                                      --      Thi
     SysPrint("PerformRecovery:  Sending RRR\n")
 
     GLOBALS.RecoverType = Rtype
-    if GLOBALS.conn ~= '' then
-        GLOBALS.conn:send("RRR\n")
-    end
+    GLOBALS.conn:send("RRR\n")
     GLOBALS.main_state = MSTATE_DO_RECOVERY
     GLOBALS.timer1.time = 5500                                       -- 5 + 1/2 seconds
 end
@@ -852,7 +849,6 @@ function Close_Then_Connect()
 
     if GLOBALS.First_Comms_Addr ~= "" then                                      -- really have a valid socket to close?
         GLOBALS.conn:close()                                                    --   yeah. standard close
-        GLOBALS.conn=''
     end
 
     GLOBALS.First_Comms_Has_Run = false                                         -- 'good' Connection Indicator inits to false
@@ -863,7 +859,6 @@ function Close_Then_Connect()
     if R == nil then                                                            -- if R is nil, that's not good
         SysPrint("Close_Then_Connect: Error with conn:connect: " .. S .. "\n")  --    Show error msg with connect()
         GLOBALS.conn:close()                                                    --    Close socket up
-        GLOBALS.conn=''
         return 0                                                                --    return Error Code
     else                                                                        -- Good connect!
         GLOBALS.First_Comms_Addr = IP_tbox.value                                --    Keep IP Addr where connect happened
@@ -1234,10 +1229,10 @@ lbl_press  = iup.label { title = "(Pressures)",  ALIGNMENT="ALEFT", font = "COUR
 
 
 if Pressures_Table ~= nil then
-    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.11"
+    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.10"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,lbl_press,lbl_emptM1,btn_Terminate}
 else
-    GLOBALS.Dtitle = "Bear Performance Testing   1.11"
+    GLOBALS.Dtitle = "Bear Performance Testing   1.10"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate}
 end
 

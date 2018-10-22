@@ -83,7 +83,6 @@ MSTATE_MELT_PRE_MONITOR_AND_LOG = 5
 MSTATE_MELT_MONITOR_AND_LOG     = 6
 MSTATE_DO_TERMINATE_MAKE        = 7
 MSTATE_DO_TERMINATE_MELT        = 8
-MSTATE_DO_RECOVERY              = 9
 
 LOOK_NONE                       = 0
 LOOK_START_MAKE                 = 1
@@ -220,7 +219,6 @@ GLOBALS = {
              CR_count            = 0,
              terminate_count     = 0,
              PTindex             = 0,
-             RecoverType         = 0,
              LogfileFD           = '',
              SyslogFD            = '',
              First_Comms_Addr    = '',
@@ -693,35 +691,26 @@ function CMD_Make_Monitor_Log()
                                                                                        --    this routine gets called continually
 end
 
-function CMD_Do_Recovery()                                                        --      This is where recovery should happen
+function PerformRecovery(Rtype)                                                        --      This is where recovery should happen
+    SysPrint("PerformRecovery:  Sending RRRRR\n")
+
+    GLOBALS.conn:send("RRRRR\n");  os_sleep(3500);
 
     if common_CMD_Test_Conn1() == 0 then                                               --    Try to connect
-        SysPrint("==== (Recovery)Socket Error", "ERROR!\n\rconn:connect()=====\n")     --    error message if unsuccessful
-        PerformRecovery(GLOBALS.RecoverType)
-        GLOBALS.timer1.run = "YES"                                                         -- Must do this to keep the timer running, so that
+        iup.Message("(Recovery)Socket Error", "ERROR!\n\rconn:connect()")              --    error message if unsuccessful
+        GLOBALS.main_state = MSTATE_CMD_NONE
         return
     end
 
-    SysPrint("CMD_Do_Recovery:  Connection OK\n")
+    SysPrint("PerformRecovery:  Connection OK\n")
 
-    if GLOBALS.RecoverType == DEF_MAKE then
+    if Rtype == DEF_MAKE then
         SysPrint("PerformRecovery:  Make_kickoff\n")
         common_Make_kickoff( "YES", 5 )
     else
         SysPrint("PerformRecovery:  Melt_kickoff\n")
         common_Melt_kickoff( "YES", 5 )
     end
-end
-
-function PerformRecovery(Rtype)                                      --      This is where recovery should happen
-    SysPrint("PerformRecovery:  Sending RRR\n")
-
-    GLOBALS.RecoverType = Rtype
-    if GLOBALS.conn ~= '' then
-        GLOBALS.conn:send("RRR\n")
-    end
-    GLOBALS.main_state = MSTATE_DO_RECOVERY
-    GLOBALS.timer1.time = 5500                                       -- 5 + 1/2 seconds
 end
 
 
@@ -837,7 +826,6 @@ function GLOBALS.timer1:action_cb()
     elseif GLOBALS.main_state == MSTATE_MELT_MONITOR_AND_LOG      then   CMD_Melt_Monitor_Log()
     elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MAKE         then   CMD_Do_Terminate(DEF_MAKE)
     elseif GLOBALS.main_state == MSTATE_DO_TERMINATE_MELT         then   CMD_Do_Terminate(DEF_MELT)
-    elseif GLOBALS.main_state == MSTATE_DO_RECOVERY               then   CMD_Do_Recovery()
     end
 
     return iup.DEFAULT
@@ -852,7 +840,6 @@ function Close_Then_Connect()
 
     if GLOBALS.First_Comms_Addr ~= "" then                                      -- really have a valid socket to close?
         GLOBALS.conn:close()                                                    --   yeah. standard close
-        GLOBALS.conn=''
     end
 
     GLOBALS.First_Comms_Has_Run = false                                         -- 'good' Connection Indicator inits to false
@@ -863,7 +850,6 @@ function Close_Then_Connect()
     if R == nil then                                                            -- if R is nil, that's not good
         SysPrint("Close_Then_Connect: Error with conn:connect: " .. S .. "\n")  --    Show error msg with connect()
         GLOBALS.conn:close()                                                    --    Close socket up
-        GLOBALS.conn=''
         return 0                                                                --    return Error Code
     else                                                                        -- Good connect!
         GLOBALS.First_Comms_Addr = IP_tbox.value                                --    Keep IP Addr where connect happened
@@ -1234,10 +1220,10 @@ lbl_press  = iup.label { title = "(Pressures)",  ALIGNMENT="ALEFT", font = "COUR
 
 
 if Pressures_Table ~= nil then
-    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.11"
+    GLOBALS.Dtitle = "Bear Performance Pressures Testing   1.09"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,lbl_press,lbl_emptM1,btn_Terminate}
 else
-    GLOBALS.Dtitle = "Bear Performance Testing   1.11"
+    GLOBALS.Dtitle = "Bear Performance Testing   1.09"
     GLOBALS.Hbox = iup.hbox{lbl_empt05,btn_Make,lbl_empt06,img_MakeResult,lbl_emptP,btn_Melt,lbl_empt07,img_MeltResult,lbl_emptQ,tgl_Both,lbl_emptM,btn_Terminate}
 end
 
